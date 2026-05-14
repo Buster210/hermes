@@ -1,4 +1,16 @@
-# 🪽 HuggingMes + Hermes WebUI
+---
+title: {{title}}
+emoji: {{emoji}}
+colorFrom: {{colorFrom}}
+colorTo: {{colorTo}}
+sdk: {{sdk}}
+sdk_version: "{{sdkVersion}}"
+{{#pythonVersion}}
+python_version: "{{pythonVersion}}"
+{{/pythonVersion}}
+app_file: app.py
+pinned: false
+---
 
 Run your own AI agent with a chat interface on Hugging Face Spaces — for free.
 
@@ -17,7 +29,7 @@ All credit goes to the original creators. This repo just wires them together.
 
 [![Duplicate this Space](https://huggingface.co/datasets/huggingface/badges/resolve/main/duplicate-this-space-xl.svg)](https://huggingface.co/spaces/f4b404/hermes?duplicate=true)
 
-Click the badge above, name your space, pick **CPU Basic (Free)**, and keep it public.
+Click the badge above, name your space → pick **CPU Basic (Free)** → and keep it public(else the .hf.space urls won't work).
 
 ### 2. Add Your Secrets
 
@@ -26,8 +38,8 @@ Go to **Settings → Variables and secrets** in your new Space and add these:
 | Secret | What It's For | How to Get It |
 |--------|---------------|---------------|
 | `GATEWAY_TOKEN` | Your password for logging into the chat | Make up any strong password |
-| `HF_TOKEN` | Saves your chats and settings so they don't disappear | [Get a Write token here](https://huggingface.co/settings/tokens) |
-| `CLOUDFLARE_WORKERS_TOKEN` | Keeps your Space awake and lets Telegram work | [Create a token here](https://dash.cloudflare.com/profile/api-tokens) with **Edit Cloudflare Workers** permission |
+| `HF_TOKEN` | Saves your chats and settings so they don't disappear | [Go here](https://huggingface.co/settings/tokens) → Create new token → Pick write|
+| `CLOUDFLARE_WORKERS_TOKEN` | Keeps your Space awake and lets Telegram work | [Create a token here](https://dash.cloudflare.com/profile/api-tokens) choose **Edit Cloudflare Workers** template |
 
 ### 3. Add an AI Provider
 
@@ -51,6 +63,8 @@ HuggingMes + Hermes WebUI router listening on 0.0.0.0:7861
 ```
 
 Open your Space URL (`https://your-name.hf.space`) in a **new tab**, enter your `GATEWAY_TOKEN`, and start chatting.
+Open Hermes Dashboard from here (`https://f4b404-hermes.hf.space/hm/app`)
+
 
 > **Pro tip:** Bookmark the direct `*.hf.space` URL — it works better on mobile than the Hugging Face embed.
 
@@ -89,7 +103,7 @@ When `HF_TOKEN` is set:
 
 ## Want It on Your Phone?
 
-Check out the companion Android app: [F4bC0d3/hermes-mobile](https://github.com/F4bC0d3/hermes-mobile)
+Use the same (`https://your-name.hf.space`) url in android and then you can install it as Progressive Web App(PWA) or just use the same url on any browser for normal chat using the web.
 
 ---
 
