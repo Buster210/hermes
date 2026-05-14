@@ -60,6 +60,7 @@ HuggingMes + Hermes WebUI router listening on 0.0.0.0:7861
 ```
 
 Open the Space URL (`https://<you>-<name>.hf.space`) in a **new tab** (the embedded HF iframe sometimes blocks the login cookie). You'll see a login page → enter your `GATEWAY_TOKEN` → the chat UI loads.
+Open the Space URL (`https://<you>-<name>.hf.space/hm`) for the hermes dashboard
 
 > **Tip**: bookmark the direct `*.hf.space` URL rather than the HF page — much smoother on mobile and avoids iframe quirks.
 
