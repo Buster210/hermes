@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.cache/
+*.log
+*.pid
+*.tmp
