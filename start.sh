@@ -60,6 +60,23 @@ fi
 # ── Setup state dirs ──────────────────────────────────────────────────
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,workspace,home,plugins,webui}
 
+# Rotate on-disk logs at boot. The router + WebUI + dashboard tee their
+# stdout into $HERMES_HOME/logs/*.log via `tee -a`, which means without
+# rotation those files grow forever and end up in the HF Dataset backup.
+# Strategy: if a log is >5MB, rename to .1 (overwriting any previous .1)
+# and start fresh. Cheap, deterministic, no cron needed.
+if [ -d "$HERMES_HOME/logs" ]; then
+  for f in "$HERMES_HOME/logs"/*.log; do
+    [ -f "$f" ] || continue
+    sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+    if [ "$sz" -gt 5242880 ]; then
+      mv -f "$f" "${f}.1"
+      : > "$f"
+      echo "rotated $(basename "$f") ($sz bytes -> .1)"
+    fi
+  done
+fi
+
 # Expose hermes CLI to login shells
 mkdir -p "$HERMES_HOME/.local/bin"
 ln -sfn /opt/hermes/.venv/bin/hermes "$HERMES_HOME/.local/bin/hermes"

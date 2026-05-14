@@ -50,8 +50,14 @@ EXCLUDED_DIRS = {
     "__pycache__",
     "node_modules",
     "venv",
+    "logs",          # log files are useless after a restart
 }
 EXCLUDED_TOP_LEVEL = {"logs", STATE_FILE.name}
+EXCLUDED_SUFFIXES = (
+    ".log", ".log.1", ".log.2",
+    ".db-shm", ".db-wal", ".db-journal",
+    ".pid", ".tmp",
+)
 if not INCLUDE_ENV:
     EXCLUDED_TOP_LEVEL.add(".env")
 
@@ -126,7 +132,7 @@ def should_exclude(rel_posix: str, path: Path) -> bool:
         return True
     if path.is_file():
         name_lower = path.name.lower()
-        if name_lower.endswith((".db-shm", ".db-wal", ".db-journal")):
+        if name_lower.endswith(EXCLUDED_SUFFIXES):
             return True
         try:
             return path.stat().st_size > MAX_FILE_SIZE_BYTES

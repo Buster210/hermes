@@ -90,6 +90,85 @@ if old in src:
     print("kanban patch: applied")
 PY
 
+# Quiet hermes-webui's per-request access log noise.
+# By default it prints `[webui] {"ts":...,"method":...}` for EVERY request,
+# which drowns the HF Logs tab once any browser tab is open polling
+# /api/dashboard/status, /api/health/agent, /api/sessions, /sw.js, etc.
+# Patch log_request() to drop 2xx responses for high-frequency poll paths.
+# Errors and chat/streaming paths still log normally.
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+import sys
+
+p = Path("/opt/hermes-webui/server.py")
+if not p.exists():
+    sys.exit(0)
+src = p.read_text(encoding="utf-8")
+sentinel = "# huggingmes-webui: quiet-poll-paths"
+if sentinel in src:
+    sys.exit(0)
+
+old = (
+    "    def log_request(self, code: str='-', size: str='-') -> None:\n"
+    "        \"\"\"Structured JSON logs for each request.\"\"\"\n"
+    "        import json as _json\n"
+    "        duration_ms = round((time.time() - getattr(self, '_req_t0', time.time())) * 1000, 1)\n"
+    "        record = _json.dumps({\n"
+    "            'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),\n"
+    "            'method': self.command or '-',\n"
+    "            'path': self.path or '-',\n"
+    "            'status': int(code) if str(code).isdigit() else code,\n"
+    "            'ms': duration_ms,\n"
+    "        })\n"
+    "        print(f'[webui] {record}', flush=True)"
+)
+
+new = (
+    "    _QUIET_POLL_PATHS = (  " + sentinel + "\n"
+    "        '/api/health/agent', '/api/dashboard/status',\n"
+    "        '/api/dashboard/config', '/api/sessions', '/api/profiles',\n"
+    "        '/api/profile/active', '/api/onboarding/status',\n"
+    "        '/api/insights', '/api/system/health',\n"
+    "        '/api/settings', '/api/projects', '/api/reasoning',\n"
+    "        '/api/models', '/api/chat/stream/status',\n"
+    "        '/api/git-info', '/sw.js', '/health',\n"
+    "    )\n"
+    "    _QUIET_PREFIXES = ('/static/', '/session/static/', '/assets/')\n"
+    "\n"
+    "    def log_request(self, code: str='-', size: str='-') -> None:\n"
+    "        \"\"\"Structured JSON logs for each request, skipping noisy polls.\"\"\"\n"
+    "        # Always log non-2xx so 401/404/5xx remain visible.\n"
+    "        try:\n"
+    "            status_int = int(code) if str(code).isdigit() else 0\n"
+    "        except Exception:\n"
+    "            status_int = 0\n"
+    "        path = (self.path or '').split('?', 1)[0]\n"
+    "        if 200 <= status_int < 400:\n"
+    "            if path in self._QUIET_POLL_PATHS:\n"
+    "                return\n"
+    "            for pref in self._QUIET_PREFIXES:\n"
+    "                if path.startswith(pref):\n"
+    "                    return\n"
+    "        import json as _json\n"
+    "        duration_ms = round((time.time() - getattr(self, '_req_t0', time.time())) * 1000, 1)\n"
+    "        record = _json.dumps({\n"
+    "            'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),\n"
+    "            'method': self.command or '-',\n"
+    "            'path': self.path or '-',\n"
+    "            'status': int(code) if str(code).isdigit() else code,\n"
+    "            'ms': duration_ms,\n"
+    "        })\n"
+    "        print(f'[webui] {record}', flush=True)"
+)
+
+if old in src:
+    p.write_text(src.replace(old, new), encoding="utf-8")
+    print("webui log-quiet patch: applied")
+else:
+    print("webui log-quiet patch: pattern not found, skipping")
+PY
+
 # Keep hermes CLI on PATH for all shell types (login/interactive/non-interactive)
 RUN echo 'export PATH="/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH"' \
     > /etc/profile.d/hermes-venv.sh
