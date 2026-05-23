@@ -870,6 +870,36 @@ const server = http.createServer(async (req, res) => {
 
   // 6c. /api/* routes — these are WebUI API calls when Referer isn't the
   //     dashboard. Fall through to the catch-all below.
+  //
+  // Exception: hermes-workspace probes for the *legacy* enhanced-fork chat
+  // endpoint at POST /api/sessions/<id>/chat/stream. Without this rule the
+  // request falls through to WebUI's catch-all, which doesn't 404 it
+  // cleanly, so the workspace's detector sets `enhancedChat=true`, sends
+  // chat there at runtime, and the UI surfaces a generic "Authentication
+  // error". Returning an explicit 404 here makes the workspace fall back
+  // to the OpenAI-compatible /v1/chat/completions path on the gateway —
+  // which is the only chat surface this Space actually exposes.
+  //
+  // Anything the dashboard or WebUI legitimately need under /api/sessions/
+  // already has a more specific match above (referer check / /hmd
+  // passthrough), so this only fires for cross-origin probes.
+  if (
+    /^\/api\/sessions\/[^/]+\/chat\/stream\/?$/.test(path) &&
+    !refererIsDashboard
+  ) {
+    res.writeHead(404, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    });
+    res.end(
+      JSON.stringify({
+        error: "not_found",
+        message:
+          "Legacy enhanced-fork chat stream is not exposed by this Space. Use /v1/chat/completions.",
+      }),
+    );
+    return;
+  }
 
   // 7. Anything else -> Hermes WebUI (primary UI) OR HuggingMes status page.
   //    WebUI handles its own auth internally via HERMES_WEBUI_PASSWORD.
