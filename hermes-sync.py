@@ -71,10 +71,64 @@ HF_API = HfApi(token=HF_TOKEN) if HF_TOKEN else None
 STOP_EVENT = threading.Event()
 _REPO_ID_CACHE: str | None = None
 
+# `.env` warning: on HF Spaces, the dashboard's "Env" tab writes to
+# $HERMES_HOME/.env which is *not* backed up by default (see EXCLUDED_TOP_LEVEL
+# above). That means provider keys typed into the dashboard silently disappear
+# on every restart. We can't safely fix that by default — uploading plaintext
+# secrets to a dataset is the wrong tradeoff — but we can make the failure
+# loud. The status surface on the HuggingMes status page reads the JSON below,
+# so an `env_warning` field renders as a banner without any extra plumbing.
+ENV_FILE = HERMES_HOME / ".env"
+ON_HF_SPACE = bool(os.environ.get("SPACE_ID") or os.environ.get("SPACE_HOST"))
+
+
+def env_warning_payload() -> dict | None:
+    """Detect plaintext-secret-loss risk and return a warning blob, or None.
+
+    Fires when:
+      * we're on an HF Space (ephemeral filesystem), AND
+      * `.env` exists with non-trivial content, AND
+      * SYNC_INCLUDE_ENV is off (so .env is NOT being backed up).
+
+    The warning is informational. We never refuse to start sync, and we never
+    auto-flip SYNC_INCLUDE_ENV — the user must opt in to backing up plaintext.
+    """
+    if not ON_HF_SPACE or INCLUDE_ENV:
+        return None
+    try:
+        if not ENV_FILE.is_file():
+            return None
+        # Count non-empty, non-comment lines as a proxy for "user-set keys".
+        keys = 0
+        for raw in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                keys += 1
+        if keys <= 0:
+            return None
+        return {
+            "kind": "ephemeral_env",
+            "keys": keys,
+            "message": (
+                f"{keys} entr{'y' if keys == 1 else 'ies'} in $HERMES_HOME/.env "
+                "will be wiped on the next Space restart. Move secrets to "
+                "Space Secrets (Settings -> Variables and secrets), or set "
+                "SYNC_INCLUDE_ENV=1 to back up .env to the private dataset "
+                "(plaintext; weaker security)."
+            ),
+        }
+    except OSError:
+        return None
+
 
 def write_status(status: str, message: str, fingerprint: str | None = None, marker: tuple[int, int, int] | None = None) -> None:
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    payload = {"status": status, "message": message, "timestamp": timestamp}
+    payload: dict = {"status": status, "message": message, "timestamp": timestamp}
+    warning = env_warning_payload()
+    if warning is not None:
+        payload["warning"] = warning
 
     tmp_path = STATUS_FILE.with_suffix(".tmp")
     try:
@@ -310,6 +364,11 @@ def loop() -> int:
         write_status("error", str(exc))
         print(f"Hermes sync error: {exc}")
         return 1
+
+    warning = env_warning_payload()
+    if warning is not None:
+        # Loud, single-line, easy to grep in HF Space logs.
+        print(f"Hermes sync WARNING: {warning['message']}")
 
     # Seed from any prior run so we don't re-upload an identical tree.
     last_fingerprint: str | None = None

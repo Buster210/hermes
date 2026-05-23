@@ -554,6 +554,11 @@ function renderStatusPage(data) {
   const backupDetail = data.backup?.message
     ? escapeHtml(data.backup.message)
     : "No status yet";
+  // Extra one-line warning row for known-loud failure modes (currently:
+  // ephemeral .env on a Space). hermes-sync.py emits this via warning.message.
+  const backupWarning = data.backup?.warning?.message
+    ? `<div class="tile-warning">${escapeHtml(data.backup.warning.message)}</div>`
+    : "";
   const keepAliveDetail = keepaliveConfigured
     ? `Pinging <code>${escapeHtml(data.keepalive.targetUrl || "/health")}</code>`
     : keepaliveStatus === "error" && data.keepalive?.message
@@ -596,9 +601,9 @@ function renderStatusPage(data) {
     }),
     renderTile({
       title: "Backup",
-      value: toneBadge(syncStatus.toUpperCase(), syncTone),
-      detail: backupDetail,
-      tone: syncTone,
+      value: toneBadge(syncStatus.toUpperCase(), data.backup?.warning ? "warn" : syncTone),
+      detail: backupDetail + backupWarning,
+      tone: data.backup?.warning ? "warn" : syncTone,
       meta: data.backup?.timestamp
         ? `<span class="local-time" data-iso="${data.backup.timestamp}"></span>`
         : "",
@@ -646,6 +651,7 @@ function renderStatusPage(data) {
     .tile-value { font-size:1.12rem; font-weight:850; overflow-wrap:anywhere; }
     .tile-detail { color:var(--soft); line-height:1.45; font-size:.83rem; }
     .tile-meta { color:var(--muted); line-height:1.4; font-size:.75rem; margin-top:auto; overflow-wrap:anywhere; }
+    .tile-warning { color:#fde68a; background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.32); border-radius:6px; padding:6px 8px; margin-top:6px; font-size:.78rem; line-height:1.4; }
     code { background:#232234; border:1px solid #34324c; border-radius:6px; padding:2px 6px; color:var(--text); font-size:.9em; }
     .badge { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; padding:5px 10px; font-size:.72rem; font-weight:850; line-height:1; text-transform:uppercase; }
     .badge.ok { color:var(--good); border-color:rgba(34,197,94,.34); background:rgba(34,197,94,.11); }

@@ -82,7 +82,7 @@ Open Hermes Dashboard from here (`https://f4b404-hermes.hf.space/hm/app`)
 ## Your Data Is Safe
 
 When `HF_TOKEN` is set:
-- All your chats, files, settings, and agent memory are backed up to a **private** Hugging Face Dataset every 10 minutes
+- All your chats, files, settings, and agent memory are backed up to a **private** Hugging Face Dataset within seconds of each change (change-driven, capped at 60 s)
 - If the Space restarts, everything comes back exactly as you left it
 
 ---
@@ -121,6 +121,28 @@ Use the same (`https://your-name.hf.space`) url in android and then you can inst
 | `BACKUP_DATASET_NAME` | Name of the private HF Dataset used for persistence (default `huggingmes-backup`) |
 
 ## Configure LLM Provider via Config Editor
+
+> ### ⚠️ Provider keys go in HF Space Secrets, not the dashboard's Env tab
+>
+> The Hermes dashboard exposes an "Env" editor that writes to `/opt/data/.env`
+> inside the container. **That file is *not* backed up to your HF Dataset.**
+> On every Space sleep / rebuild the container's filesystem is wiped, the
+> `.env` is gone, and your `OLLAMA_API_KEY` / `OPENROUTER_API_KEY` /
+> `ANTHROPIC_API_KEY` / etc. disappear with it. The Space then 500s on the
+> first chat with `Provider 'X' is set in config.yaml but no API key was
+> found`.
+>
+> **Always add provider keys as HF Space Secrets** (Settings → Variables and
+> secrets → New secret). HF injects them as env vars at boot, never writes
+> them to disk on the Space, and they survive every restart.
+>
+> Use the dashboard's Env tab only for non-secret tweaks. The status page's
+> Backup tile will show a yellow warning whenever it detects keys sitting in
+> the ephemeral `.env` so you don't have to remember this on your own.
+>
+> If you accept the security tradeoff and want `.env` backed up anyway, set
+> `SYNC_INCLUDE_ENV=1` as a Space Variable. The dataset is private, but a
+> leak of that dataset URL is then a leak of every key in `.env`.
 
 If you prefer not to add API keys as HF Secrets, you can configure providers directly in Hermes after the Space starts:
 
