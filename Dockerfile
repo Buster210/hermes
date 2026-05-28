@@ -1,1 +1,193 @@
-IyBIdWdnaW5nTWVzICsgSGVybWVzIFdlYlVJIOKAlCBtZXJnZWQgZGVwbG95bWVudCBmb3IgSHVnZ2luZyBGYWNlIFNwYWNlcwojIEJhc2U6IE5vdXNSZXNlYXJjaCBIZXJtZXMgQWdlbnQgKHNoaXBzIEhlcm1lcyBDTEksIGdhdGV3YXksIGRhc2hib2FyZCwgUHl0aG9uIHZlbnYpCgpBUkcgSEVSTUVTX0FHRU5UX1ZFUlNJT049bGF0ZXN0CkZST00gbm91c3Jlc2VhcmNoL2hlcm1lcy1hZ2VudDoke0hFUk1FU19BR0VOVF9WRVJTSU9OfQoKUkcgV0VCVUlfUkVGPW1hc3RlcgoKVVNFUiByb290CgojIFN5c3RlbSBkZXBzIChtaXJyb3JzIEh1Z2dpbmdNZXMpICsgZ2l0L25vZGVqcyBmb3IgV2ViVUkgY2hlY2tvdXQgKyByb3V0ZXIKUlVOIGFwdC1nZXQgdXBkYXRlICYmIGFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcwogICAgY2EtY2VydGlmaWNhdGVzIFwKICAgIGN1cmwgXAogICAganEgXAogICAgZ2l0IFwKICAgIHB5dGhvbjMgXAogICAgbm9kZWpzIFwKICAgIG5wbSBcCiAgICBjaHJvbWl1bSBcCiAgICBsaWJudHMzIFwKICAgIGxpYmF0azEuMC0wIFwKICAgIGxpYmF0ay1icmlkZ2UyLjAtMCBcCiAgICBsaWJkcm0yIFwKICAgIGxpYmdibTEgXAogICAgbGlieGNvbXBvc2l0ZTEgXAogICAgbGlieGRhbWFnZTEgXAogICAgbGlieHJhbmRyMiBcCiAgICBsaWJ4a2Jjb21tb24wIFwKICAgIGxpYngxMS02IFwKICAgIGxpYng2IFwKICAgIGxpYnhmaXhlczMgXAogICAgbGliYXNvdW5kMiBcCiAgICBmb250cy1kZWphdnUtY29yZSBcCiAgICBmb250cy1saWJlcmF0aW9uIFwKICAgIGZvbnRzLW5vdG8tY29sb3ItZW1vamkgXAogICAgJiYgcm0gLXJmIC92YXIvbGliL2FwdC9saXN0cy8qIFwKICAgICYmIHV2IHBpcCBpbnN0YWxsIC0tcHl0aG9uIC9vcHQvaGVybWVzLy52ZW52L2Jpbi9weXRob24gLS1uby1jYWNoZS1kaXIgXAogICAgICAgIGh1Z2dpbmdmYWNlX2h1YiBoZl90cmFuc2ZlciBweXlhbWwKCiMgQ2xvbmUgbmVzcXVlbmEvaGVybWVzLXdlYnVpIChpbnN0YWxsIGRlcHMgaW50byB0aGUgYWdlbnQgdmVudiBzbyBpbXBvcnRzIHJlc29sdmUpClJVTiBnaXQgY2xvbmUgLS1kZXB0aCAxIC0tYnJhbmNoICR7V0VCVUlfUkVGfQogICAgICAgIGh0dHBzOi8vZ2l0aHViLmNvbS9uZXNxdWVuYS9oZXJtZXMtd2VidWkuZ2l0IC9vcHQvaGVybWVzLXdlYnVpIFwKICYmICggWyAtZiAvb3B0L2hlcm1lcy13ZWJ1aS9yZXF1aXJlbWVudHMudHh0IF0KICAgICAgJiYgL29wdC9oZXJtZXMvLnZlbnYvYmluL3BpcCBpbnN0YWxsIC0tbm8tY2FjaGUtZGlyIC1yIC9vcHQvaGVybWVzLXdlYnVpL3JlcXVpcmVtZW50cy50eHQgXAogICAgICB8fCB0cnVlICkgXAogICYmIGNob3duIC1SIGhlcm1lczpoZXJtZXMgL29wdC9oZXJtZXMtd2VidWkKCiMgSHVnZ2luZ01lcy1zdHlsZSBpbnRlZ3JhdGlvbiBzY3JpcHRzICh2ZW5kb3JlZCBmcm9tIHNvbXJhdHByby9IdWdnaW5nTWVzKQpDT1BZIC0tY2hvd249aGVybWVzOmhlcm1lcyBzdGFydC5zaCAgICAgICAgICAgICAgICAgICAgICAgICAgIC9vcHQvaHVnZ2luZ21lcy9zdGFydC5zaApDT1BZIC0tY2hvd249aGVybWVzOmhlcm1lcyBoZWFsdGgtc2VydmVyLmpzICAgICAgICAgICAgICAgICAgICAvb3B0L2h1Z2dpbmdtZXMvaGVhbHRoLXNlcnZlci5qcwpDT1BZIC0tY2hvd249aGVybWVzOmhlcm1lcyBoZXJtZXMtc3luYy5weSAgICAgICAgICAgICAgICAgICAgIC9vcHQvaHVnZ2luZ21lcy9oZXJtZXMtc3luYy5weQpDT1BZIC0tY2hvd249aGVybWVzOmhlcm1lcyBjbG91ZGZsYXJlLXByb3h5LXNldHVwLnB5ICAgICAgL29wdC9odWdnaW5nbWVzL2Nsb3VkZmxhcmUtcHJveHktc2V0dXAucHkKQ09QWSAtLWNob3duPWhlcm1lczpoZXJtZXMgY2xvdWRmbGFyZS1rZWVwYWxpdmUtc2V0dXAucHkgIC9vcHQvaHVnZ2luZ21lcy9jbG91ZGZsYXJlLWtlZXBhbGl2ZS1zZXR1cC5weQoKUlVOIGNobW9kICt4IFwKICAgIC9vcHQvaHVnZ2luZ21lcy9zdGFydC5zaCBcCiAgICAvb3B0L2h1Z2dpbmdtZXMvaGVybWVzLXN5bmMucHkgXAogICAgL29wdC9odWdnaW5nbWVzL2Nsb3VkZmxhcmUtcHJveHktc2V0dXAucHkgXAogICAgL29wdC9odWdnaW5nbWVzL2Nsb3VkZmxhcmUta2VlcGFsaXZlLXNldHVwLnB5CgojIElkZW1wb3RlbnQga2FuYmFuIG1pZ3JhdGlvbiBwYXRjaCAoc2FtZSB3b3JrYXJvdW5kIEh1Z2dpbmdNZXMgc2hpcHMpClJVTiBweXRob24zIC0gPDwnUFknCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAppbXBvcnQgc3lzCnAgPSBQYXRoKCIvb3B0L2hlcm1lcy9oZXJtZXNfY2xpL2thbmJhbl9kYi5weSIpCmlmIG5vdCBwLmV4aXN0cygpOgogICAgc3lzLmV4aXQoMCkKc3JjID0gcC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKc2VudGluZWwgPSAiIyBodWdnaW5nbWVzLXdlYnVpOiBpZGVtcG90ZW50LWFsdGVyIgppZiBzZW50aW5lbCBpbiBzcmM6CiAgICBzeXMuZXhpdCgwKQpvbGQgPSAoCiAgICAnICAgIGNvbm4uZXhlY3V0ZShcbicKICAgICcgICAgICAgICJBTFRFUiBUQUJMRSB0YXNrcyBBREQgQ09MVU1OIGNvbnNlY3V0aXZlX2ZhaWx1cmVzICInCiAgICAnICAgICAgICAiSU5URUdFUiBOT1QgTlVMTCBERUZBVUxUIDAiJwogICAgJyAgICApJwopCm5ldyA9ICgKICAgIGYnICAgIHRyeTogIHtzZW50aW5lbH1cbicKICAgICcgICAgICAgIGNvbm4uZXhlY3V0ZShcbicKICAgICcgICAgICAgICAgICAiQUxURVIgVEFCTEUgdGFza3MgQUREIENPTFVNTiBjb25zZWN1dGl2ZV9mYWlsdXJlcyAiJwogICAgJyAgICAgICAgICAgICJJTlRFR0VSIE5PVCBOVUxMIERFRkFVTFQgMCInCiAgICAnICAgICAgICApXG4nCiAgICAnICAgIGV4Y2VwdCBFeGNlcHRpb246XG4nCiAgICAnICAgICAgICBwYXNzJwppZiBvbGQgaW4gc3JjOgogICAgcC53cml0ZV90ZXh0KHNyYy5yZXBsYWNlKG9sZCwgbmV3KSwgZW5jb2Rpbmc9InV0Zi04IikKICAgIHByaW50KCJrYW5iYW4gcGF0Y2g6IGFwcGxpZWQiKwpQWQoKIyBRdWlldCBoZXJtZXMtd2VidWkncyBwZXItcmVxdWVzdCBhY2Nlc3MgbG9nIG5vaXNlLgojIEJ5IGRlZmF1bHQgaXQgcHJpbnRzIGBbd2VidWldIHsidHMiOi4uLiJtZXRob2QiOi4uLn1gIGZvciBFVkVSWSByZXF1ZXN0LAojIHdoaWNoIGRyb3ducyB0aGUgSEYgTG9ncyB0YWIgb25jZSBhbnkgYnJvd3NlciB0YWIgaXMgb3BlbiBwb2xsaW5nCiMgL2FwaS9kYXNoYm9hcmQvc3RhdHVzLCAvYXBpL2hlYWx0aC9hZ2VudCwgL2FwaS9zZXNzaW9ucywgL3N3LmpzLCBldGMuCiMgUGF0Y2ggbG9nX3JlcXVlc3QoKSB0byBkcm9wIDJ4eCByZXNwb25zZXMgZm9yIGhpZ2gtZnJlcXVlbmN5IHBvbGwgcGF0aHMuCiMgRXJyb3JzIGFuZCBjaGF0L3N0cmVhbWluZyBwYXRocyBzdGlsbCBsb2cgbm9ybWFsbHkuClJVTiBweXRob24zIC0gPDwnUFknCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAppbXBvcnQgcmUKaW1wb3J0IHN5cwoKcCA9IFBhdGgoIi9vcHQvaGVybWVzLXdlYnVpL3NlcnZlci5weSIpCmlmIG5vdCBwLmV4aXN0cygpOgogICAgc3lzLmV4aXQoMCkKc3JjID0gcC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKc2VudGluZWwgPSAiIyBodWdnaW5nbWVzLXdlYnVpOiBxdWlldC1wb2xsLXBhdGhzIgppZiBzZW50aW5lbCBpbiBzcmM6CiAgICBzeXMuZXhpdCgwKQoKb2xkID0gKAogICAgIiAgICBkZWYgbG9nX3JlcXVlc3Qoc2VsZiwgY29kZTogc3RyPSctJywgc2l6ZTogc3RyPSctJykgLT4gTm9uZzpcbiIKICAgICIgICAgICAgIFwiXCJcIlN0cnVjdHVyZWQgSlNPTiBsb2dzIGZvciBlYWNoIHJlcXVlc3QuXCJcIlwiXG4iCiAgICAiICAgICAgICBpbXBvcnQganNvbiBhcyBfanNvblxuIgogICAgIiAgICAgICAgZHVyYXRpb25fbXMgPSByb3VuZCgodGltZS50aW1lKCkgLSBnZXRhdHRyKHNlbGYsICdfcmVxX3QwJywgdGltZS50aW1lKCkpKSAqIDEwMDAsIDEpXG4iCiAgICAiICAgICAgICByZWNvcmQgPSBfanNvbi5kdW1wcyh7XG4iCiAgICAiICAgICAgICAgICAgJ3RzJzogdGltZS5zdHJmdGltZSgnJVktJW0tJWRUJUglbTolJVN6JywgdGltZS5nbXRpbWUoKSksXG4iCiAgICAiICAgICAgICAgICAgJ21ldGhvZCc6IHNlbGYuY29tbWFuZCBvciAnLScsXG4iCiAgICAiICAgICAgICAgICAgJ3BhdGgnOiBzZWxmLnBhdGggb3IgJy0nLFxuIgogICAgIiAgICAgICAgICAgICdzdGF0dXMnOiBpbnQoY29kZSkgaWYgc3RyKGNvZGUpLmlzZGlnaXQoKSBlbHNlIGNvZGUsXG4iCiAgICAiICAgICAgICAgICAgJ21zJzogZHVyYXRpb25fbXMsXG4iCiAgICAiICAgICAgICB9KVxuIgogICAgIiAgICAgICAgcHJpbnQoZidbd2VidWldIHtyZWNvcmR9JywgZmx1c2g9VHJ1ZSkiCQoKbmV3ID0gKAogICAgIiAgICBfUVVJRVRfUE9MTF9QQVRIUyA9ICggICIgKyBzZW50aW5lbCArICJcbiIKICAgICIgICAgICAgICcvYXBpL2hlYWx0aC9hZ2VudCcsICcvYXBpL2Rhc2hib2FyZC9zdGF0dXMnLFxuIgogICAgIiAgICAgICAgJy9hcGkvZGFzaGJvYXJkL2NvbmZpZycsICcvYXBpL3Nlc3Npb25zJywgJy9hcGkvcHJvZmlsZXMnLFxuIgogICAgIiAgICAgICAgJy9hcGkvcHJvZmlsZS9hY3RpdmUnLCAnL2FwaS9vbmJvYXJkaW5nL3N0YXR1cycsXG4iCiAgICAiICAgICAgICAnL2FwaS9pbnNpZ2h0cycsICcvYXBpL3N5c3RlbS9oZWFsdGgnLFxuIgogICAgIiAgICAgICAgJy9hcGkvc2V0dGluZ3MnLCAnL2FwaS9wcm9qZWN0cycsICcvYXBpL3JlYXNvbmluZycsXG4iCiAgICAiICAgICAgICAnL2FwaS9tb2RlbHMnLCAnL2FwaS9jaGF0L3N0cmVhbS9zdGF0dXMnLFxuIgogICAgIiAgICAgICAgJy9hcGkvZ2l0LWluZm8nLCAnL3N3LmpzJywgJy9oZWFsdGgnLFxuIgogICAgIiAgICApXG4iCiAgICAiICAgIF9RVUlFVF9QUkVGSVhFUyA9ICgnL3N0YXRpYy8nLCAnL3Nlc3Npb24vc3RhdGljLycsICcvYXNzZXRzLycpXG4iCiAgICAiXG4iCiAgICAiICAgIGRlZiBsb2dfcmVxdWVzdChzZWxmLCBjb2RlOiBzdHI9Jy0nLCBzaXplOiBzdHI9Jy0nKSAtPiBOb25lOlxuIgogICAgIiAgICAgICAgXCJcIlwiU3RydWN0dXJlZCBKU09OIGxvZ3MgZm9yIGVhY2ggcmVxdWVzdCwgc2tpcHBpbmcgbm9pc3kgcG9sbHMuXCJcIlwiXG4iCiAgICAiICAgICAgICAjIEFsd2F5cyBsb2cgbm9uLTJ4eCBzbyA0MDEvNDA0LzV4eCByZW1haW4gdmlzaWJsZS5cbiIKICAgICIgICAgICAgIHRyeTpcbiIKICAgICIgICAgICAgICAgICBzdGF0dXNfaW50ID0gaW50KGNvZGUpIGlmIHN0cihjb2RlKS5pc2RpZ2l0KCkgZWxzZSAwXG4iCiAgICAiICAgICAgICBleGNlcHQgRXhjZXB0aW9uOlxuIgogICAgIiAgICAgICAgICAgIHN0YXR1c19pbnQgPSAwXG4iCiAgICAiICAgICAgICBwYXRoID0gKHNlbGYucGF0aCBvciAnJykuc3BsaXQoJz8nLCAxKVswXVxuIgogICAgIiAgICAgICAgaWYgMjAwIDw9IHN0YXR1c19pbnQgPCA0MDA6XG4iCiAgICAiICAgICAgICAgICAgaWYgcGF0aCBpbiBzZWxmLl9RVUlFVF9QT0xMX1BBVEhTOlxuIgogICAgIiAgICAgICAgICAgICAgICByZXR1cm5cbiIKICAgICIgICAgICAgICAgICBmb3IgcHJlZiBpbiBzZWxmLl9RVUlFVF9QUkVGSVhFUzpcbiIKICAgICIgICAgICAgICAgICAgICAgaWYgcGF0aC5zdGFydHN3aXRoKHByZWYpOlxuIgogICAgIiAgICAgICAgICAgICAgICAgICAgcmV0dXJuXG4iCiAgICAiICAgICAgICBpbXBvcnQganNvbiBhcyBfanNvblxuIgogICAgIiAgICAgICAgZHVyYXRpb25fbXMgPSByb3VuZCgodGltZS50aW1lKCkgLSBnZXRhdHRyKHNlbGYsICdfcmVxX3QwJywgdGltZS50aW1lKCkpKSAqIDEwMDAsIDEpXG4iCiAgICAiICAgICAgICByZWNvcmQgPSBfanNvbi5kdW1wcyh7XG4iCiAgICAiICAgICAgICAgICAgJ3RzJzogdGltZS5zdHJmdGltZSgnJVktJW0tJWRUJUglbTolJVN6JywgdGltZS5nbXRpbWUoKSksXG4iCiAgICAiICAgICAgICAgICAgJ21ldGhvZCc6IHNlbGYuY29tbWFuZCBvciAnLScsXG4iCiAgICAiICAgICAgICAgICAgJ3BhdGgnOiBzZWxmLnBhdGggb3IgJy0nLFxuIgogICAgIiAgICAgICAgICAgICdzdGF0dXMnOiBpbnQoY29kZSkgaWYgc3RyKGNvZGUpLmlzZGlnaXQoKSBlbHNlIGNvZGUsXG4iCiAgICAiICAgICAgICAgICAgJ21zJzogZHVyYXRpb25fbXMsXG4iCiAgICAiICAgICAgICB9KVxuIgogICAgIiAgICAgICAgcHJpbnQoZidbd2VidWldIHtyZWNvcmR9JywgZmx1c2g9VHJ1ZSkiCQoKaWYgb2xkIGluIHNyYzoKICAgIHAud3JpdGVfdGV4dChzcmMucmVwbGFjZShvbGQsIG5ldyksIGVuY29kaW5nPSJ1dGYtOCIpCiAgICBwcmludCgid2VidWkgbG9nLXF1aWV0IHBhdGNoOiBhcHBsaWVkIikKZWxzZToKICAgIHByaW50KCJ3ZWJ1aSBsb2ctcXVpZXQgcGF0Y2g6IHBhdHRlcm4gbm90IGZvdW5kLCBza2lwcGluZyIpClBZCgojIEZpeCBwZXJtaXNzaW9ucyBzbyBoZXJtZXMgdXNlciBjYW4gc2VsZi11cGRhdGUgcGFja2FnZXMKUlVOIGNob3duIC1SIGhlcm1lczpoZXJtZXMgL29wdC9oZXJtZXMvLnZlbnYKCiMgS2VlcCBoZXJtZXMgQ0xJIG9uIFBBVEggZm9yIGFsbCBzaGVsbCB0eXBlcyAobG9naW4vaW50ZXJhY3RpdmUvbm9uLWludGVyYWN0aXZlKQpSVU4gZWNobyAnZXhwb3J0IFBBVEg9Ii9vcHQvaGVybWVzLy52ZW52L2Jpbjovb3B0L2RhdGEvLmxvY2FsL2JpbjokUEFUSCInIFwKICAgID4gL2V0Yy9wcm9maWxlLmQvaGVybWVzLXZlbnYuc2gKCiMgQ3JlYXRlIGRpcmVjdG9yeSBmb3Igc2tpbiBzeW5jaW5nIApSVU4gbWtkaXIgLXAgJHtIRVJNRVNfSE9NRX0vc2tpbnMKClJVTiBjaG93biAtUiBoZXJtZXM6aGVybWVzICR7SEVSTUVTX0hPTUV9L3NraW5zCgpFTlYgSEVSTUVTX0hPTUU9L29wdC9kYXRhIFwKICAgIEhVR0dJTkdNRVNfQVBQX0RJUj0vb3B0L2h1Z2dpbmdtZXMgXAogICAgSEVSTUVTX1dFQlVJX1JFUE89L29wdC9oZXJtZXMtd2VidWkgXAogICAgSEVSTUVTX0FHRU5UX1ZFUlNJT049JHtIRVJNRVNfQUdFTlRfVkVSU0lPTn0gXAogICAgUFlUSE9OVU5CVUZGRVJFVD0xIFwKICAgIEhGX0hVQl9FTkFCTEVfSEZfVFJBTlNGRVI9MSBcCiAgICBQTEFZV1JJR0hUX0NIUk9NSVVNX0VYRUNVVEFCTEVfUEFUSD0vdXNyL2Jpbi9jaHJvbWl1bQpFWFBPU0UgNzg2MQpIRUFMVEhDSEVDSyAtLWludGVydmFsPTM0cyAtLXRpbWVvdXQ9NXMgLS1zdGFydC1wZXJpb2Q9MTI2cyBcClJVTiBjdXJsIC1mc1MgaHR0cDovL2xvY2FsaG9zdDo3ODYxL2hlYWx0aCB8fCBleGl0IDEKCiMgQ3JlYXRlIGRpcmVjdG9yeSBmb3Igc2tpbiBzeW5jaW5nIFUKUlVOIG1rZGlyIC1wICR7SEVSTUVTX0hPTUV9L3NraW5zIApSVU4gY2hvd24gLVIgaGVybWVzOmhlcm1lcyAke0hFUk1FU19IT01FfS9za2lucyA=
+﻿# HuggingMes + Hermes WebUI — merged deployment for Hugging Face Spaces
+# Base: NousResearch Hermes Agent (ships Hermes CLI, gateway, dashboard, Python venv)
+
+ARG HERMES_AGENT_VERSION=latest
+FROM nousresearch/hermes-agent:${HERMES_AGENT_VERSION}
+
+ARG WEBUI_REF=master
+
+USER root
+
+# System deps (mirrors HuggingMes) + git/nodejs for WebUI checkout + router
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    jq \
+    git \
+    python3 \
+    nodejs \
+    npm \
+    chromium \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libgbm1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxext6 \
+    libxfixes3 \
+    libasound2 \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
+        huggingface_hub hf_transfer pyyaml
+
+# Clone nesquena/hermes-webui (install deps into the agent venv so imports resolve)
+RUN git clone --depth 1 --branch ${WEBUI_REF} \
+        https://github.com/nesquena/hermes-webui.git /opt/hermes-webui \
+ && ( [ -f /opt/hermes-webui/requirements.txt ] \
+      && /opt/hermes/.venv/bin/pip install --no-cache-dir -r /opt/hermes-webui/requirements.txt \
+      || true ) \
+ && chown -R hermes:hermes /opt/hermes-webui
+
+# HuggingMes-style integration scripts (vendored from somratpro/HuggingMes)
+COPY --chown=hermes:hermes start.sh                       /opt/huggingmes/start.sh
+COPY --chown=hermes:hermes health-server.js               /opt/huggingmes/health-server.js
+COPY --chown=hermes:hermes hermes-sync.py                 /opt/huggingmes/hermes-sync.py
+COPY --chown=hermes:hermes cloudflare-proxy-setup.py      /opt/huggingmes/cloudflare-proxy-setup.py
+COPY --chown=hermes:hermes cloudflare-keepalive-setup.py  /opt/huggingmes/cloudflare-keepalive-setup.py
+
+RUN chmod +x \
+    /opt/huggingmes/start.sh \
+    /opt/huggingmes/hermes-sync.py \
+    /opt/huggingmes/cloudflare-proxy-setup.py \
+    /opt/huggingmes/cloudflare-keepalive-setup.py
+
+# Idempotent kanban migration patch (same workaround HuggingMes ships)
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+p = Path("/opt/hermes/hermes_cli/kanban_db.py")
+if not p.exists():
+    sys.exit(0)
+src = p.read_text(encoding="utf-8")
+sentinel = "# huggingmes-webui: idempotent-alter"
+if sentinel in src:
+    sys.exit(0)
+old = (
+    '    conn.execute(\n'
+    '        "ALTER TABLE tasks ADD COLUMN consecutive_failures "\n'
+    '        "INTEGER NOT NULL DEFAULT 0"\n'
+    '    )'
+)
+new = (
+    f'    try:  {sentinel}\n'
+    '        conn.execute(\n'
+    '            "ALTER TABLE tasks ADD COLUMN consecutive_failures "\n'
+    '            "INTEGER NOT NULL DEFAULT 0"\n'
+    '        )\n'
+    '    except Exception:\n'
+    '        pass'
+)
+if old in src:
+    p.write_text(src.replace(old, new), encoding="utf-8")
+    print("kanban patch: applied")
+PY
+
+# Quiet hermes-webui's per-request access log noise.
+# By default it prints \[webui] {"ts":...,"method":...}\ for EVERY request,
+# which drowns the HF Logs tab once any browser tab is open polling
+# /api/dashboard/status, /api/health/agent, /api/sessions, /sw.js, etc.
+# Patch log_request() to drop 2xx responses for high-frequency poll paths.
+# Errors and chat/streaming paths still log normally.
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+import sys
+
+p = Path("/opt/hermes-webui/server.py")
+if not p.exists():
+    sys.exit(0)
+src = p.read_text(encoding="utf-8")
+sentinel = "# huggingmes-webui: quiet-poll-paths"
+if sentinel in src:
+    sys.exit(0)
+
+old = (
+    "    def log_request(self, code: str='-', size: str='-') -> None:\n"
+    "        \"\"\"Structured JSON logs for each request.\"\"\"\n"
+    "        import json as _json\n"
+    "        duration_ms = round((time.time() - getattr(self, '_req_t0', time.time())) * 1000, 1)\n"
+    "        record = _json.dumps({\n"
+    "            'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),\n"
+    "            'method': self.command or '-',\n"
+    "            'path': self.path or '-',\n"
+    "            'status': int(code) if str(code).isdigit() else code,\n"
+    "            'ms': duration_ms,\n"
+    "        })\n"
+    "        print(f'[webui] {record}', flush=True)"
+)
+
+new = (
+    "    _QUIET_POLL_PATHS = (  " + sentinel + "\n"
+    "        '/api/health/agent', '/api/dashboard/status',\n"
+    "        '/api/dashboard/config', '/api/sessions', '/api/profiles',\n"
+    "        '/api/profile/active', '/api/onboarding/status',\n"
+    "        '/api/insights', '/api/system/health',\n"
+    "        '/api/settings', '/api/projects', '/api/reasoning',\n"
+    "        '/api/models', '/api/chat/stream/status',\n"
+    "        '/api/git-info', '/sw.js', '/health',\n"
+    "    )\n"
+    "    _QUIET_PREFIXES = ('/static/', '/session/static/', '/assets/')\n"
+    "\n"
+    "    def log_request(self, code: str='-', size: str='-') -> None:\n"
+    "        \"\"\"Structured JSON logs for each request, skipping noisy polls.\"\"\"\n"
+    "        # Always log non-2xx so 401/404/5xx remain visible.\n"
+    "        try:\n"
+    "            status_int = int(code) if str(code).isdigit() else 0\n"
+    "        except Exception:\n"
+    "            status_int = 0\n"
+    "        path = (self.path or '').split('?', 1)[0]\n"
+    "        if 200 <= status_int < 400:\n"
+    "            if path in self._QUIET_POLL_PATHS:\n"
+    "                return\n"
+    "            for pref in self._QUIET_PREFIXES:\n"
+    "                if path.startswith(pref):\n"
+    "                    return\n"
+    "        import json as _json\n"
+    "        duration_ms = round((time.time() - getattr(self, '_req_t0', time.time())) * 1000, 1)\n"
+    "        record = _json.dumps({\n"
+    "            'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),\n"
+    "            'method': self.command or '-',\n"
+    "            'path': self.path or '-',\n"
+    "            'status': int(code) if str(code).isdigit() else code,\n"
+    "            'ms': duration_ms,\n"
+    "        })\n"
+    "        print(f'[webui] {record}', flush=True)"
+)
+
+if old in src:
+    p.write_text(src.replace(old, new), encoding="utf-8")
+    print("webui log-quiet patch: applied")
+else:
+    print("webui log-quiet patch: pattern not found, skipping")
+PY
+
+# Fix permissions so hermes user can self-update packages
+RUN chown -R hermes:hermes /opt/hermes/.venv
+
+# Keep hermes CLI on PATH for all shell types (login/interactive/non-interactive)
+RUN echo 'export PATH="/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH"' \
+    > /etc/profile.d/hermes-venv.sh
+
+ENV HERMES_HOME=/opt/data \
+    HUGGINGMES_APP_DIR=/opt/huggingmes \
+    HERMES_WEBUI_REPO=/opt/hermes-webui \
+    HERMES_AGENT_VERSION=${HERMES_AGENT_VERSION} \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+EXPOSE 7861
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s \
+  CMD curl -fsS http://localhost:7861/health || exit 1
+
+USER hermes
+ENTRYPOINT ["/opt/huggingmes/start.sh"]
