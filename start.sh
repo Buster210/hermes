@@ -331,20 +331,105 @@ echo "Gateway    : 127.0.0.1:${GATEWAY_API_PORT}"
 echo "Dashboard  : 127.0.0.1:${DASHBOARD_PORT}"
 echo ""
 
+# ── Process launchers ─────────────────────────────────────────────────
+# Supervisor loop restarts dead services via these launchers.
+start_health() {
+  node "$APP_DIR/health-server.js" &
+  HEALTH_PID=$!
+}
+
+start_dashboard() {
+  echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}..."
+  (hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
+  DASHBOARD_PID=$!
+}
+
+start_gateway() {
+  echo "Launching Hermes gateway..."
+  (hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
+  GATEWAY_PID=$!
+}
+
+start_webui() {
+  echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}..."
+  (cd "$WEBUI_REPO" && \
+     "$HERMES_WEBUI_PYTHON" "$WEBUI_REPO/server.py" 2>&1 | \
+     tee -a "$HERMES_HOME/logs/webui.log") &
+  WEBUI_PID=$!
+}
+
+# Kept alive by supervisor; silent death = silent data loss.
+SYNC_LOOP_PID=""
+start_sync_loop() {
+  [ -n "${HF_TOKEN:-}" ] || return 0
+  if [ -n "${SYNC_LOOP_PID:-}" ] && kill -0 "$SYNC_LOOP_PID" 2>/dev/null; then
+    return 0
+  fi
+  python3 -u "$APP_DIR/hermes-sync.py" loop &
+  SYNC_LOOP_PID=$!
+}
+
+# No-op without HF_TOKEN.
+sync_now() {
+  [ -n "${HF_TOKEN:-}" ] || return 0
+  python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: state sync failed."
+}
+
+# Returns 0 on connect or if pid dies/timeout.
+wait_port_ready() {
+  local port="$1" timeout="$2" pid="$3" i
+  for ((i=0; i<timeout; i++)); do
+    if (echo > "/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+kill_tree() {
+  local pid="$1" child
+  [ -n "$pid" ] || return 0
+  if [ -r "/proc/$pid/task/$pid/children" ]; then
+    for child in $(cat "/proc/$pid/task/$pid/children" 2>/dev/null); do
+      kill_tree "$child"
+    done
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
 # ── Graceful shutdown ─────────────────────────────────────────────────
 graceful_shutdown() {
+  trap '' SIGTERM SIGINT   # ignore repeat signals so the final sync isn't interrupted
   echo "Shutting down..."
-  if [ -n "${HF_TOKEN:-}" ]; then
-    python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: shutdown sync failed."
-  fi
+  sync_now
+  for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}"; do
+    kill_tree "$pid"
+  done
   kill $(jobs -p) 2>/dev/null || true
   exit 0
 }
 trap graceful_shutdown SIGTERM SIGINT
 
-# ── Start the public-facing router (port 7861) ────────────────────────
-node "$APP_DIR/health-server.js" &
-HEALTH_PID=$!
+# ── WebUI runtime env (static; exported once) ─────────────────────────
+# Agent venv paths; state backed up from $HERMES_HOME/webui.
+export HERMES_WEBUI_AGENT_DIR="/opt/hermes"
+export HERMES_WEBUI_PYTHON="/opt/hermes/.venv/bin/python"
+export HERMES_WEBUI_HOST="127.0.0.1"
+export HERMES_WEBUI_PORT
+export HERMES_WEBUI_STATE_DIR="${HERMES_WEBUI_STATE_DIR:-$HERMES_HOME/webui}"
+export HERMES_WEBUI_DEFAULT_WORKSPACE="${HERMES_WEBUI_DEFAULT_WORKSPACE:-$HERMES_HOME/workspace}"
+export HERMES_WEBUI_AUTO_INSTALL="0"
+mkdir -p "$HERMES_WEBUI_STATE_DIR"
+
+GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-120}"
+WEBUI_READY_TIMEOUT="${WEBUI_READY_TIMEOUT:-60}"
+
+# ── Initial boot ──────────────────────────────────────────────────────
+start_health
 
 if [ -n "${WEBHOOK_URL:-}" ]; then
   python3 - <<'PY' >/dev/null 2>&1 &
@@ -361,30 +446,12 @@ urllib.request.urlopen(req, timeout=10).read()
 PY
 fi
 
-# ── Launch Hermes dashboard (private; proxied via /hm/app) ────────────
-echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}..."
-(hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
-DASHBOARD_PID=$!
+# Private; no readiness gate.
+start_dashboard
 
-# ── Launch Hermes gateway ─────────────────────────────────────────────
-echo "Launching Hermes gateway..."
-(hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
-GATEWAY_PID=$!
-
-GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-120}"
-ready=false
-for ((i=0; i<GATEWAY_READY_TIMEOUT; i++)); do
-  if (echo > "/dev/tcp/127.0.0.1/${GATEWAY_API_PORT}") 2>/dev/null; then
-    ready=true
-    break
-  fi
-  if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
-    break
-  fi
-  sleep 1
-done
-
-if [ "$ready" != "true" ]; then
+# Fatal on first boot; no gateway = useless container.
+start_gateway
+if ! wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
   echo ""
   echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
   echo "----------------------------------------"
@@ -392,47 +459,93 @@ if [ "$ready" != "true" ]; then
   exit 1
 fi
 
-# ── Launch WebUI ──
-# Points at the agent venv, persists under $HERMES_HOME/webui for backup.
-export HERMES_WEBUI_AGENT_DIR="/opt/hermes"
-export HERMES_WEBUI_PYTHON="/opt/hermes/.venv/bin/python"
-export HERMES_WEBUI_HOST="127.0.0.1"
-export HERMES_WEBUI_PORT
-export HERMES_WEBUI_STATE_DIR="${HERMES_WEBUI_STATE_DIR:-$HERMES_HOME/webui}"
-export HERMES_WEBUI_DEFAULT_WORKSPACE="${HERMES_WEBUI_DEFAULT_WORKSPACE:-$HERMES_HOME/workspace}"
-export HERMES_WEBUI_AUTO_INSTALL="0"
-mkdir -p "$HERMES_WEBUI_STATE_DIR"
+# Start persistence before state mutations.
+start_sync_loop
 
-echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}..."
-(cd "$WEBUI_REPO" && \
-   "$HERMES_WEBUI_PYTHON" "$WEBUI_REPO/server.py" 2>&1 | \
-   tee -a "$HERMES_HOME/logs/webui.log") &
-WEBUI_PID=$!
+# Non-fatal; router shows it as down.
+start_webui
+if wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
+  echo "Hermes WebUI is up."
+else
+  echo "Warning: Hermes WebUI not ready within ${WEBUI_READY_TIMEOUT}s. Last 20 log lines:"
+  tail -20 "$HERMES_HOME/logs/webui.log" || true
+fi
 
-# Non-fatal timeout — router handles unreachable.
-WEBUI_READY_TIMEOUT="${WEBUI_READY_TIMEOUT:-60}"
-for ((i=0; i<WEBUI_READY_TIMEOUT; i++)); do
-  if (echo > "/dev/tcp/127.0.0.1/${WEBUI_PORT}") 2>/dev/null; then
-    echo "Hermes WebUI is up."
-    break
+# ── Supervisor loop ───────────────────────────────────────────────────
+# Polls PIDs; restarts dead services; caps restarts.
+SUPERVISOR_POLL_INTERVAL="${SUPERVISOR_POLL_INTERVAL:-5}"
+SUPERVISOR_MAX_RESTARTS="${SUPERVISOR_MAX_RESTARTS:-0}"
+HEALTH_RESTARTS=0
+DASHBOARD_RESTARTS=0
+GATEWAY_RESTARTS=0
+WEBUI_RESTARTS=0
+SYNC_RESTARTS=0
+
+cap_reached() {  # restart_count
+  [ "$SUPERVISOR_MAX_RESTARTS" != "0" ] && [ "$1" -ge "$SUPERVISOR_MAX_RESTARTS" ]
+}
+
+while true; do
+  sleep "$SUPERVISOR_POLL_INTERVAL"
+
+  if ! kill -0 "$HEALTH_PID" 2>/dev/null; then
+    HEALTH_RESTARTS=$((HEALTH_RESTARTS + 1))
+    if cap_reached "$HEALTH_RESTARTS"; then
+      echo "health-server hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
+      exit 1
+    fi
+    echo "Warning: health-server died; restart #${HEALTH_RESTARTS}..."
+    start_health
+    sync_now
   fi
+
+  if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
+    DASHBOARD_RESTARTS=$((DASHBOARD_RESTARTS + 1))
+    if cap_reached "$DASHBOARD_RESTARTS"; then
+      echo "dashboard hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
+      exit 1
+    fi
+    echo "Warning: Hermes dashboard died; restart #${DASHBOARD_RESTARTS}..."
+    start_dashboard
+    sync_now
+  fi
+
+  if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+    GATEWAY_RESTARTS=$((GATEWAY_RESTARTS + 1))
+    if cap_reached "$GATEWAY_RESTARTS"; then
+      echo "gateway hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
+      exit 1
+    fi
+    echo "Warning: Hermes gateway died; restart #${GATEWAY_RESTARTS}..."
+    start_gateway
+    if ! wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
+      echo "Warning: gateway not ready within ${GATEWAY_READY_TIMEOUT}s after restart."
+    fi
+    sync_now
+  fi
+
   if ! kill -0 "$WEBUI_PID" 2>/dev/null; then
-    echo "Warning: Hermes WebUI exited during startup. Last 20 log lines:"
-    tail -20 "$HERMES_HOME/logs/webui.log" || true
-    break
+    WEBUI_RESTARTS=$((WEBUI_RESTARTS + 1))
+    if cap_reached "$WEBUI_RESTARTS"; then
+      echo "webui hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
+      exit 1
+    fi
+    echo "Warning: Hermes WebUI died; restart #${WEBUI_RESTARTS}..."
+    start_webui
+    if ! wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
+      echo "Warning: webui not ready within ${WEBUI_READY_TIMEOUT}s after restart."
+    fi
+    sync_now
   fi
-  sleep 1
+
+  if [ -n "${HF_TOKEN:-}" ] && { [ -z "${SYNC_LOOP_PID:-}" ] || ! kill -0 "$SYNC_LOOP_PID" 2>/dev/null; }; then
+    SYNC_RESTARTS=$((SYNC_RESTARTS + 1))
+    if cap_reached "$SYNC_RESTARTS"; then
+      echo "backup sync loop hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
+      exit 1
+    fi
+    echo "Warning: backup sync loop died; restart #${SYNC_RESTARTS}..."
+    SYNC_LOOP_PID=""
+    start_sync_loop
+  fi
 done
-
-# ── Periodic backup loop ──────────────────────────────────────────────
-if [ -n "${HF_TOKEN:-}" ]; then
-  python3 -u "$APP_DIR/hermes-sync.py" loop &
-fi
-
-# ── Wait on gateway ──
-wait "$GATEWAY_PID"
-
-if [ -n "${HF_TOKEN:-}" ]; then
-  echo "Gateway exited - syncing state before shutdown..."
-  python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: final sync failed."
-fi

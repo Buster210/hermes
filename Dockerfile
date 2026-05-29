@@ -4,7 +4,7 @@
 ARG HERMES_AGENT_VERSION=latest
 FROM nousresearch/hermes-agent:${HERMES_AGENT_VERSION}
 
-ARG WEBUI_REF=master
+ARG WEBUI_REF=v0.51.252
 
 USER root
 
