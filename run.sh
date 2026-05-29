@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Local launcher: ./run.sh <agent-name> [up|down|logs|build]
-# Selects an agent from agents/<name>/, layers env (root .env then agent.env),
-# and runs docker compose in a per-agent project so multiple agents don't collide.
 set -euo pipefail
 
 NAME="${1:?usage: ./run.sh <agent-name> [up|down|logs|build]}"
@@ -19,12 +16,12 @@ AGENT_DIR="agents/${NAME}"
 
 export AGENT_NAME="$NAME"
 
-# Source agent.env (non-secret overrides for compose interpolation). Repo-root .env is loaded
-# by compose itself (env_file + native interpolation) — we do NOT `.` it here, since values
-# like the JSON-list GEMINI_API_KEYS aren't shell-safe.
+# .env loaded by compose; here only agent.env (JSON values aren't shell-safe to source).
 set -a
 [ -f "$AGENT_DIR/agent.env" ] && . "$AGENT_DIR/agent.env"
 set +a
+
+export CACHEBUST="$(date +%s)"
 
 PROJECT="hermes-${NAME}"
 

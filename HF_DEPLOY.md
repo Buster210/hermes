@@ -51,7 +51,7 @@ One baked image → N independent HF Space agents. Each agent differs by its sou
 - **Stable AGENT_NAME:** never change it for an existing Space. State lives at `/data/<AGENT_NAME>/`; a rename orphans sessions, memories, and the credential pool.
 - **Gemini pool is env-driven:** keys are reset and re-added from `GEMINI_API_KEYS` on every boot, so editing the secret + restarting the Space updates the pool exactly. No stale keys accumulate.
 - **Tokens/allowlists are env-only:** Hermes reads `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USERS` / `TELEGRAM_HOME_CHANNEL` from the environment — they are NOT written via `hermes config set`.
-- **Telegram proxy:** `TELEGRAM_BASE_URL` is set into `gateway.platforms.telegram.extra.base_url`; the optional `TELEGRAM_PROXY_HOST` sed-patch is also applied if set.
+- **Telegram proxy:** `TELEGRAM_BASE_URL` is set into `gateway.platforms.telegram.extra.base_url`; on HF/Render its host is also sed-patched into Hermes' source to catch the IP-fallback path that bypasses `base_url`.
 - **Token rotation:** rotate via BotFather, update the Space secret, restart the Space.
 - **Propagation:** soul/base-config changes require a rebuild+redeploy. Image-level changes are shared by all agents.
 - **Respawn on crash:** the entrypoint loops forever, restarting the gateway on any non-zero exit.

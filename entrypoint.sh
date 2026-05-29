@@ -4,7 +4,7 @@
 # Required env (cloud):  AGENT_NAME, TELEGRAM_BOT_TOKEN
 # Optional env:          GEMINI_API_KEYS, GEMINI_API_KEY, HF_TOKEN,
 #                        AGENT_MODEL, AGENT_PROVIDER, AGENT_PERSONALITY,
-#                        TELEGRAM_BASE_URL, TELEGRAM_PROXY_HOST,
+#                        TELEGRAM_BASE_URL,
 #                        TELEGRAM_ALLOWED_USERS, TELEGRAM_HOME_CHANNEL
 set -euo pipefail
 umask 077
@@ -160,22 +160,27 @@ if [ -n "${HF_TOKEN:-}" ]; then
 	hermes model set-provider hf --default || warn "HF provider config failed (continuing)"
 fi
 
-# Gemini key pool: reset each boot (deterministic), then add every key from GEMINI_API_KEYS.
-# Hermes seeds at most 2 keys from env (GOOGLE_API_KEY, GEMINI_API_KEY); the ONLY way to pool
-# N keys is `hermes auth add`. Each add gets a random id (no value-dedup), so we clear first.
+# Gemini key pool: parse keys FIRST, then reset+reseed ONLY when ≥1 valid key parsed — a malformed
+# GEMINI_API_KEYS (e.g. a stray line-break inside a key) must never wipe a working pool. The parser
+# strips raw control chars and retries once, so a line-wrapped paste still seeds. Hermes seeds ≤2 keys
+# from env; the ONLY way to pool N keys is `hermes auth add` (random id per add, no dedup) — clear first.
 GEMINI_ADDED=0
+GEMINI_KEYS=()
+GEMINI_SRC=""
 if [ -n "${GEMINI_API_KEYS:-}" ]; then
-	reset_gemini_pool
-	while IFS= read -r k; do
-		if add_gemini_key "$k"; then GEMINI_ADDED=$((GEMINI_ADDED + 1)); fi
-	done < <(
+	GEMINI_SRC="GEMINI_API_KEYS"
+	mapfile -t GEMINI_KEYS < <(
 		python3 -c '
-import json, sys
+import json, re, sys
+raw = sys.argv[1]
 try:
-    keys = json.loads(sys.argv[1])
-except Exception as e:
-    sys.stderr.write("GEMINI_API_KEYS parse error: %s\n" % e)
-    sys.exit(0)
+    keys = json.loads(raw)
+except Exception:
+    try:
+        keys = json.loads(re.sub(r"[\x00-\x1f]", "", raw))
+    except Exception as e:
+        sys.stderr.write("GEMINI_API_KEYS parse error: %s\n" % e)
+        sys.exit(0)
 if not isinstance(keys, list):
     sys.stderr.write("GEMINI_API_KEYS must be a JSON list\n")
     sys.exit(0)
@@ -185,13 +190,21 @@ for x in keys:
         print(x)
 ' "$GEMINI_API_KEYS"
 	)
-	log "Gemini pool reset and seeded with $GEMINI_ADDED key(s)"
 elif [ -n "${GEMINI_API_KEY:-}" ]; then
+	GEMINI_SRC="GEMINI_API_KEY"
+	GEMINI_KEYS=("$GEMINI_API_KEY")
+fi
+
+if [ "${#GEMINI_KEYS[@]}" -gt 0 ]; then
 	reset_gemini_pool
-	if add_gemini_key "$GEMINI_API_KEY"; then GEMINI_ADDED=1; fi
-	log "Gemini pool seeded with $GEMINI_ADDED key(s) from GEMINI_API_KEY"
+	for k in "${GEMINI_KEYS[@]}"; do
+		if add_gemini_key "$k"; then GEMINI_ADDED=$((GEMINI_ADDED + 1)); fi
+	done
+	log "Gemini pool reset and seeded with $GEMINI_ADDED key(s) from $GEMINI_SRC"
+elif [ -n "$GEMINI_SRC" ]; then
+	warn "$GEMINI_SRC set but 0 valid keys parsed — keeping existing pool (NOT reset)"
 else
-	warn "No GEMINI_API_KEYS or GEMINI_API_KEY set — Gemini pool is empty"
+	warn "No GEMINI_API_KEYS or GEMINI_API_KEY set — Gemini pool unchanged"
 fi
 
 hermes config set credential_pool_strategies.gemini round_robin ||
@@ -219,6 +232,13 @@ hermes config set gateway.platforms.telegram.extra.base_url "$TELEGRAM_BASE_URL"
 	log "telegram base_url -> $TELEGRAM_BASE_URL" ||
 	warn "telegram base_url config failed (continuing)"
 
+# Re-set telegram.reactions each boot: the /data symlink shadows the baked telegram.reactions=true
+# and the persisted config omits it, so HF would otherwise reply without reactions (Render, ephemeral,
+# re-bakes the config each boot and keeps them on). This restores parity across platforms.
+hermes config set telegram.reactions true &&
+	log "telegram reactions -> enabled" ||
+	warn "telegram reactions config failed (continuing)"
+
 # On cloud, force-disable the IP-fallback transport. Hermes auto-discovers Telegram datacenter
 # IPs and attaches a transport that dials api.telegram.org directly (telegram.py:1535), which
 # overrides base_url and hangs where the host is blocked. Disabling it leaves a plain client that
@@ -226,13 +246,17 @@ hermes config set gateway.platforms.telegram.extra.base_url "$TELEGRAM_BASE_URL"
 if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
 	export HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=true
 	log "Telegram IP-fallback disabled (base_url-only routing on $PLATFORM)"
-fi
 
-if [ -n "${TELEGRAM_PROXY_HOST:-}" ]; then
-	SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/local/lib/python3.11/site-packages")
-	find "$SITE_PACKAGES" -path "*/hermes*" -type f \( -name "*.py" -o -name "*.json" \) \
-		-exec sed -i "s/api.telegram.org/$TELEGRAM_PROXY_HOST/g" {} + 2>/dev/null || true
-	log "Telegram proxy (sed-patch) configured: $TELEGRAM_PROXY_HOST"
+	# Source-level catch for the same bypass: rewrite hardcoded api.telegram.org refs
+	# to the proxy host derived from TELEGRAM_BASE_URL (scheme + path stripped off).
+	PROXY_HOST="${TELEGRAM_BASE_URL#*://}"
+	PROXY_HOST="${PROXY_HOST%%/*}"
+	if [ -n "$PROXY_HOST" ] && [ "$PROXY_HOST" != "api.telegram.org" ]; then
+		SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/local/lib/python3.14/site-packages")
+		find "$SITE_PACKAGES" -path "*/hermes*" -type f \( -name "*.py" -o -name "*.json" \) \
+			-exec sed -i "s/api.telegram.org/$PROXY_HOST/g" {} + 2>/dev/null || true
+		log "Telegram proxy (sed-patch) -> $PROXY_HOST"
+	fi
 fi
 
 # Telegram bot token + allowlists are env-only in Hermes (no config keys) — log presence, never values.

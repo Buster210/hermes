@@ -20,6 +20,7 @@ Each agent lives in `agents/<name>/`:
 |---|---|
 | `soul.md` | Persona/identity prompt. Copied to `$HERMES_HOME/SOUL.md` at boot. |
 | `agent.env` | NON-secret per-agent overrides (`HOST_PORT`, `TELEGRAM_BASE_URL`, `AGENT_PERSONALITY`). Tracked in git. |
+| `.state/` | Per-agent runtime state (auth pool, dbs, sessions, memories), bind-mounted to `/data/<name>` at boot. Gitignored and excluded from the image — never committed or baked. |
 
 `AGENT_NAME` selects the agent (and scopes its persistent state under `/data/<AGENT_NAME>/`). Secrets stay in the repo-root `.env` (local) or platform secrets (cloud) — never in `agent.env`.
 
@@ -42,8 +43,7 @@ The container always serves on `7860`; locally each agent maps it to a unique ho
 | `GEMINI_API_KEY` | Yes* | Single-key fallback if `GEMINI_API_KEYS` is unset. |
 | `TELEGRAM_ALLOWED_USERS` | Yes | Comma-separated Telegram user IDs allowed to DM the bot. |
 | `TELEGRAM_HOME_CHANNEL` | No | Chat ID for cron/notification delivery. |
-| `TELEGRAM_BASE_URL` | No | Telegram API base URL (proxy). Defaults to the committed Cloudflare Worker. |
-| `TELEGRAM_PROXY_HOST` | No | Optional legacy sed-patch host for `api.telegram.org` (kept alongside `TELEGRAM_BASE_URL`). |
+| `TELEGRAM_BASE_URL` | No | Telegram API base URL (proxy). Defaults to the committed Cloudflare Worker; on HF/Render its host is also patched into Hermes' source to catch the IP-fallback path. |
 | `AGENT_PERSONALITY` | No | Overrides `display.personality` (default `kawaii`). |
 | `HF_TOKEN` | No | Hugging Face token (HF provider / model access). |
 
@@ -59,7 +59,7 @@ Gemini key pooling: the pool is **reset and re-seeded from `GEMINI_API_KEYS` on 
 ./run.sh ritesh down     # stop
 ```
 
-`run.sh` exports `AGENT_NAME`, layers `.env` then `agents/<name>/agent.env`, and runs `docker compose -p hermes-<name>`. Per-agent state persists under `./.data/<name>/` (mirrors the cloud `/data/<name>/` layout). Each agent boots fresh on first run — no state is migrated from the old `.hermes/`.
+`run.sh` exports `AGENT_NAME`, layers `.env` then `agents/<name>/agent.env`, and runs `docker compose -p hermes-<name>`. Per-agent state persists under `./agents/<name>/.state/`, bind-mounted to the cloud-parity `/data/<name>/` path inside the container. Each agent boots fresh on first run — no state is migrated from the old `.hermes/`.
 
 ## Deployment
 

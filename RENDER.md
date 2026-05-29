@@ -48,7 +48,7 @@ Share secrets across services with a Render **env group**; set per-agent vars (`
 - **Stable AGENT_NAME:** never change it for an existing service. State lives at `/data/<AGENT_NAME>/`; a rename orphans sessions, memories, and the credential pool.
 - **Gemini pool is env-driven:** keys are reset and re-added from `GEMINI_API_KEYS` on every boot, so editing the var + redeploying updates the pool exactly. No stale keys accumulate.
 - **Tokens/allowlists are env-only:** Hermes reads `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USERS` / `TELEGRAM_HOME_CHANNEL` from the environment — they are NOT written via `hermes config set`.
-- **Telegram proxy:** `TELEGRAM_BASE_URL` is set into `gateway.platforms.telegram.extra.base_url`; the optional `TELEGRAM_PROXY_HOST` sed-patch is also applied if set.
+- **Telegram proxy:** `TELEGRAM_BASE_URL` is set into `gateway.platforms.telegram.extra.base_url`; on HF/Render its host is also sed-patched into Hermes' source to catch the IP-fallback path that bypasses `base_url`.
 - **tmate SSH:** the entrypoint starts tmate on every platform and prints the SSH URL to the service logs — open the Render log stream to grab it.
 - **Token rotation:** rotate via BotFather, update the service env var, redeploy.
 - **Respawn on crash:** the entrypoint loops forever, restarting the gateway on any non-zero exit.

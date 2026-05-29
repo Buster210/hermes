@@ -9,7 +9,7 @@
 *.md
 !README.md
 !agents/**/soul.md
-.data/
+agents/*/.state/
 .hermes_history
 .hermes/auth.json
 .hermes/auth.lock
