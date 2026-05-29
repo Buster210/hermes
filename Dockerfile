@@ -6,6 +6,8 @@ LABEL org.opencontainers.image.source="https://github.com/NousResearch/hermes-ag
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    tmate \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 1000 -s /bin/bash hermes
 

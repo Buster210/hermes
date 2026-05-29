@@ -81,6 +81,18 @@ EOF
 	set -a && source "$ENV_FILE" && set +a
 fi
 
+# Tmate (SSH access)
+mkdir -p "$HOME/.ssh"
+[ -f "$HOME/.ssh/id_rsa" ] || ssh-keygen -q -t rsa -N "" -f "$HOME/.ssh/id_rsa"
+echo "set -g mouse on" >"$HOME/.tmate.conf"
+tmate -S /tmp/tmate.sock new-session -d 2>/dev/null
+for i in 1 2 3 4 5; do
+	SSH_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' 2>/dev/null)
+	[ -n "$SSH_URL" ] && break
+	sleep 1
+done
+echo "SSH: ${SSH_URL:-tmate failed to connect}"
+
 if [ -n "${HF_TOKEN:-}" ]; then
 	hermes model set-provider hf --default || echo "Warning: HF provider config failed (continue)"
 fi
