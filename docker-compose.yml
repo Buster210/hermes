@@ -1,8 +1,19 @@
 services:
   hermes:
-    build: .
+    build:
+      context: .
+      args:
+        HERMES_COMMIT: v2026.5.29.2
     ports:
-      - "7860:7860"
-    env_file: .env
+      # Per-agent host port (from agents/<name>/agent.env); container always serves 7860.
+      - "${HOST_PORT:-7860}:7860"
+    env_file:
+      - .env
+    environment:
+      AGENT_NAME: ${AGENT_NAME:?run via ./run.sh <name>}
+      TELEGRAM_BASE_URL: ${TELEGRAM_BASE_URL:-}
+      GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}
+      AGENT_PERSONALITY: ${AGENT_PERSONALITY:-}
     volumes:
-      - ./.hermes:/home/hermes/.hermes
+      # Per-agent persistent storage mirroring the cloud /data/<name> layout.
+      - ./.data/${AGENT_NAME}:/data/${AGENT_NAME}

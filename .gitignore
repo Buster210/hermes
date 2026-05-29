@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Local per-agent runtime state (auth.json with API keys, dbs, sessions, memories)
+.data/
+
 
 # OS junk
 .DS_Store
