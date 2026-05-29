@@ -1,0 +1,14 @@
+# Secrets
+.env
+
+# Hermes runtime
+.hermes/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+*.swp
+*.swo
