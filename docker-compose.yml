@@ -1,0 +1,8 @@
+services:
+  hermes:
+    build: .
+    ports:
+      - "7860:7860"
+    env_file: .env
+    volumes:
+      - ./.hermes:/home/hermes/.hermes

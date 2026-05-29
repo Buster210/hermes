@@ -24,9 +24,22 @@ Hugging Face Space running [NousResearch/hermes-agent](https://github.com/NousRe
 
 Push to a Hugging Face Space with `sdk: docker`. The Space auto-builds and runs the container.
 
-## Build Locally
+## Local Development
+
+Run with `.hermes/` synced bidirectionally — config, state, sessions, memories, and logs stay in sync between host and container:
+
+```bash
+docker compose up --build
+```
+
+Or with plain Docker:
 
 ```bash
 docker build -t hermes-agent .
-docker run -p 7860:7860 --env-file .env hermes-agent
+docker run -p 7860:7860 \
+  -v $(pwd)/.hermes:/home/hermes/.hermes \
+  --env-file .env \
+  hermes-agent
 ```
+
+Changes made in the container (new sessions, memories, kanban state, logs) appear immediately in your local `.hermes/` directory and vice versa. The entrypoint detects the bind-mount automatically and skips the ephemeral storage init.
