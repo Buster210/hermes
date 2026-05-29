@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""HuggingMes Hermes state backup via Hugging Face Datasets.
+"""Hermes state backup via HF Datasets. Vendored from HuggingMes.
 
-Vendored verbatim from github.com/somratpro/HuggingMes.
-Backs up HERMES_HOME (which includes /opt/data/webui — the hermes-webui state dir)
-so sessions, profiles, skills, cron, memory, and workspace all survive restarts.
-"""
+Backs up $HERMES_HOME (sessions, profiles, skills, cron, memory, workspace,
+plugins, webui state) so the full agent workspace survives Space restarts."""
 
 import hashlib
 import json
@@ -22,11 +20,7 @@ from pathlib import Path
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("HF_HUB_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")
-# huggingface_hub 0.30+ replaced HF_HUB_ENABLE_HF_TRANSFER with this flag;
-# the legacy var triggers a FutureWarning at import on newer hubs and is
-# silently ignored. Setting only the new var means older hubs miss the
-# transfer accelerator (which is fine — they fall back to the standard
-# downloader) but no version emits a deprecation warning.
+# hf_transfer → HF_XET_HIGH_PERFORMANCE avoids FutureWarning on hub >=0.30
 os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
 from huggingface_hub import HfApi, snapshot_download, upload_folder
@@ -35,21 +29,17 @@ from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", "/opt/data"))
-STATUS_FILE = Path("/tmp/huggingmes-sync-status.json")
-STATE_FILE = HERMES_HOME / ".huggingmes-sync-state.json"
+STATUS_FILE = Path("/tmp/hermes-sync-status.json")
+STATE_FILE = HERMES_HOME / ".hermes-sync-state.json"
 INTERVAL = int(os.environ.get("SYNC_INTERVAL", "60"))
 INITIAL_DELAY = int(os.environ.get("SYNC_START_DELAY", "5"))
-# Change-driven settings: the loop polls cheap stat metadata every POLL_INTERVAL
-# seconds, and once a change is observed waits DEBOUNCE_SECONDS of quiet before
-# uploading. INTERVAL acts only as a hard ceiling — even if writes never settle,
-# a sync is forced after INTERVAL seconds. This keeps the worst-case data loss
-# window well under a minute without uploading on every keystroke.
+# Change-driven: poll metadata, wait DEBOUNCE quiet, cap at INTERVAL ceiling.
 POLL_INTERVAL = float(os.environ.get("SYNC_POLL_INTERVAL", "2"))
 DEBOUNCE_SECONDS = float(os.environ.get("SYNC_DEBOUNCE_SECONDS", "3"))
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 HF_USERNAME = os.environ.get("HF_USERNAME", "").strip()
 SPACE_AUTHOR_NAME = os.environ.get("SPACE_AUTHOR_NAME", "").strip()
-BACKUP_DATASET_NAME = os.environ.get("BACKUP_DATASET_NAME", "huggingmes-backup").strip()
+BACKUP_DATASET_NAME = os.environ.get("BACKUP_DATASET_NAME", "hermes-backup").strip()
 INCLUDE_ENV = os.environ.get("SYNC_INCLUDE_ENV", "").strip().lower() in {"1", "true", "yes"}
 MAX_FILE_SIZE_BYTES = int(os.environ.get("SYNC_MAX_FILE_BYTES", str(50 * 1024 * 1024)))
 
@@ -76,28 +66,14 @@ HF_API = HfApi(token=HF_TOKEN) if HF_TOKEN else None
 STOP_EVENT = threading.Event()
 _REPO_ID_CACHE: str | None = None
 
-# `.env` warning: on HF Spaces, the dashboard's "Env" tab writes to
-# $HERMES_HOME/.env which is *not* backed up by default (see EXCLUDED_TOP_LEVEL
-# above). That means provider keys typed into the dashboard silently disappear
-# on every restart. We can't safely fix that by default — uploading plaintext
-# secrets to a dataset is the wrong tradeoff — but we can make the failure
-# loud. The status surface on the HuggingMes status page reads the JSON below,
-# so an `env_warning` field renders as a banner without any extra plumbing.
+# .env warning: dashboard writes keys here, wiped on restart. Not backed up
+# by default (secrets in a dataset is the wrong tradeoff). Status page banner.
 ENV_FILE = HERMES_HOME / ".env"
 ON_HF_SPACE = bool(os.environ.get("SPACE_ID") or os.environ.get("SPACE_HOST"))
 
 
 def env_warning_payload() -> dict | None:
-    """Detect plaintext-secret-loss risk and return a warning blob, or None.
-
-    Fires when:
-      * we're on an HF Space (ephemeral filesystem), AND
-      * `.env` exists with non-trivial content, AND
-      * SYNC_INCLUDE_ENV is off (so .env is NOT being backed up).
-
-    The warning is informational. We never refuse to start sync, and we never
-    auto-flip SYNC_INCLUDE_ENV — the user must opt in to backing up plaintext.
-    """
+    """Detect plaintext-secret-loss risk on HF Spaces with .env and SYNC_INCLUDE_ENV off."""
     if not ON_HF_SPACE or INCLUDE_ENV:
         return None
     try:
@@ -244,7 +220,7 @@ def fingerprint_dir(root: Path) -> str:
 
 
 def create_snapshot_dir(source_root: Path) -> Path:
-    staging_root = Path(tempfile.mkdtemp(prefix="huggingmes-sync-"))
+    staging_root = Path(tempfile.mkdtemp(prefix="hermes-sync-"))
     for path in sorted(source_root.rglob("*")):
         rel = path.relative_to(source_root)
         rel_posix = rel.as_posix()
@@ -341,7 +317,7 @@ def sync_once(last_fingerprint: str | None = None, last_marker: tuple[int, int, 
             repo_id=repo_id,
             repo_type="dataset",
             token=HF_TOKEN,
-            commit_message=f"HuggingMes sync [{hostname}] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+            commit_message=f"Hermes sync [{hostname}] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
             ignore_patterns=[".git/*", ".git"],
         )
     finally:
@@ -372,10 +348,10 @@ def loop() -> int:
 
     warning = env_warning_payload()
     if warning is not None:
-        # Loud, single-line, easy to grep in HF Space logs.
+        # One-liner so it's greppable in HF logs.
         print(f"Hermes sync WARNING: {warning['message']}")
 
-    # Seed from any prior run so we don't re-upload an identical tree.
+    # Seed from prior run to avoid re-uploading identical tree.
     last_fingerprint: str | None = None
     last_marker: tuple[int, int, int] | None = None
     if STATE_FILE.exists():

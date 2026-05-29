@@ -1,5 +1,5 @@
-﻿# HuggingMes + Hermes WebUI — merged deployment for Hugging Face Spaces
-# Base: NousResearch Hermes Agent (ships Hermes CLI, gateway, dashboard, Python venv)
+# Merged deployment: Hermes router + Hermes WebUI on HF Spaces.
+# Base: NousResearch Hermes Agent (Hermes CLI, gateway, dashboard, venv).
 
 ARG HERMES_AGENT_VERSION=latest
 FROM nousresearch/hermes-agent:${HERMES_AGENT_VERSION}
@@ -8,7 +8,7 @@ ARG WEBUI_REF=master
 
 USER root
 
-# System deps (mirrors HuggingMes) + git/nodejs for WebUI checkout + router
+# System deps + WebUI checkout + router.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
         huggingface_hub hf_transfer pyyaml
 
-# Clone nesquena/hermes-webui (install deps into the agent venv so imports resolve)
+# Clone WebUI; install deps into agent venv so imports resolve.
 RUN git clone --depth 1 --branch ${WEBUI_REF} \
         https://github.com/nesquena/hermes-webui.git /opt/hermes-webui \
  && ( [ -f /opt/hermes-webui/requirements.txt ] \
@@ -46,20 +46,20 @@ RUN git clone --depth 1 --branch ${WEBUI_REF} \
       || true ) \
  && chown -R hermes:hermes /opt/hermes-webui
 
-# HuggingMes-style integration scripts (vendored from somratpro/HuggingMes)
-COPY --chown=hermes:hermes start.sh                       /opt/huggingmes/start.sh
-COPY --chown=hermes:hermes health-server.js               /opt/huggingmes/health-server.js
-COPY --chown=hermes:hermes hermes-sync.py                 /opt/huggingmes/hermes-sync.py
-COPY --chown=hermes:hermes cloudflare-proxy-setup.py      /opt/huggingmes/cloudflare-proxy-setup.py
-COPY --chown=hermes:hermes cloudflare-keepalive-setup.py  /opt/huggingmes/cloudflare-keepalive-setup.py
+# Integration scripts (vendored from HuggingMes).
+COPY --chown=hermes:hermes start.sh                       /opt/hermes/start.sh
+COPY --chown=hermes:hermes health-server.js               /opt/hermes/health-server.js
+COPY --chown=hermes:hermes hermes-sync.py                 /opt/hermes/hermes-sync.py
+COPY --chown=hermes:hermes cloudflare-proxy-setup.py      /opt/hermes/cloudflare-proxy-setup.py
+COPY --chown=hermes:hermes cloudflare-keepalive-setup.py  /opt/hermes/cloudflare-keepalive-setup.py
 
 RUN chmod +x \
-    /opt/huggingmes/start.sh \
-    /opt/huggingmes/hermes-sync.py \
-    /opt/huggingmes/cloudflare-proxy-setup.py \
-    /opt/huggingmes/cloudflare-keepalive-setup.py
+    /opt/hermes/start.sh \
+    /opt/hermes/hermes-sync.py \
+    /opt/hermes/cloudflare-proxy-setup.py \
+    /opt/hermes/cloudflare-keepalive-setup.py
 
-# Idempotent kanban migration patch (same workaround HuggingMes ships)
+# Idempotent kanban migration patch (from HuggingMes).
 RUN python3 - <<'PY'
 from pathlib import Path
 import sys
@@ -67,7 +67,7 @@ p = Path("/opt/hermes/hermes_cli/kanban_db.py")
 if not p.exists():
     sys.exit(0)
 src = p.read_text(encoding="utf-8")
-sentinel = "# huggingmes-webui: idempotent-alter"
+sentinel = "# hermes-webui: idempotent-alter"
 if sentinel in src:
     sys.exit(0)
 old = (
@@ -90,12 +90,8 @@ if old in src:
     print("kanban patch: applied")
 PY
 
-# Quiet hermes-webui's per-request access log noise.
-# By default it prints \[webui] {"ts":...,"method":...}\ for EVERY request,
-# which drowns the HF Logs tab once any browser tab is open polling
-# /api/dashboard/status, /api/health/agent, /api/sessions, /sw.js, etc.
-# Patch log_request() to drop 2xx responses for high-frequency poll paths.
-# Errors and chat/streaming paths still log normally.
+# Silence high-frequency poll paths in logs (drowns HF Logs tab otherwise).
+# Only drops 2xx — errors and streaming still log.
 RUN python3 - <<'PY'
 from pathlib import Path
 import re
@@ -105,7 +101,7 @@ p = Path("/opt/hermes-webui/server.py")
 if not p.exists():
     sys.exit(0)
 src = p.read_text(encoding="utf-8")
-sentinel = "# huggingmes-webui: quiet-poll-paths"
+sentinel = "# hermes-webui: quiet-poll-paths"
 if sentinel in src:
     sys.exit(0)
 
@@ -169,15 +165,15 @@ else:
     print("webui log-quiet patch: pattern not found, skipping")
 PY
 
-# Fix permissions so hermes user can self-update packages
+# hermes user needs write access for auto-updates.
 RUN chown -R hermes:hermes /opt/hermes/.venv
 
-# Keep hermes CLI on PATH for all shell types (login/interactive/non-interactive)
+# Keep hermes CLI on PATH for all shell types.
 RUN echo 'export PATH="/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH"' \
     > /etc/profile.d/hermes-venv.sh
 
 ENV HERMES_HOME=/opt/data \
-    HUGGINGMES_APP_DIR=/opt/huggingmes \
+    HERMES_APP_DIR=/opt/hermes \
     HERMES_WEBUI_REPO=/opt/hermes-webui \
     HERMES_AGENT_VERSION=${HERMES_AGENT_VERSION} \
     PYTHONUNBUFFERED=1 \
@@ -190,4 +186,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s \
   CMD curl -fsS http://localhost:7861/health || exit 1
 
 USER hermes
-ENTRYPOINT ["/opt/huggingmes/start.sh"]
+ENTRYPOINT ["/opt/hermes/start.sh"]

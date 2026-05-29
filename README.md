@@ -9,14 +9,53 @@ pinned: true
 license: mit
 ---
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE) [![HF Spaces](https://img.shields.io/badge/%F0%9F%A4%97-HF%20Spaces-blue)](https://huggingface.co/spaces/22f2001388/hermes) [![Docker](https://img.shields.io/badge/docker-ready-blue)](./Dockerfile) [![Upstream](https://img.shields.io/badge/upstream-22f2001388%2Fhermes-lightgrey)](https://github.com/22f2001388/hermes)
+
 Run your own AI agent with a chat interface on Hugging Face Spaces — for free.
 
-> **This is not original work.** It combines three great open-source projects into one easy-to-deploy package:
-> - [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research — the AI brain
-> - [Hermes WebUI](https://github.com/nesquena/hermes-webui) by @nesquena — the chat interface
-> - [HuggingMes](https://github.com/somratpro/HuggingMes) by @somratpro — the Hugging Face wrapper
+> **This is a fork** of four open-source projects stitched into a single Hugging Face Space. Full attribution in [Credits](#credits); license details in [`NOTICE`](./NOTICE).
 
-All credit goes to the original creators. This repo just wires them together.
+---
+
+## Features
+
+- **Chat UI** — Three-panel Hermes WebUI with SSE streaming, slash commands, profile management, theme system
+- **AI agent** — Powered by [Hermes Agent](https://github.com/NousResearch/hermes-agent): persistent memory, multi-provider LLM routing, cron jobs, skills
+- **OpenAI-compatible API** — Expose your agent at `/v1/*` from any OpenAI SDK client
+- **Telegram bridge** — Chat with Hermes from Telegram (works on private Spaces via Cloudflare proxy)
+- **Free persistence** — Chats, memory, settings, profiles all backed up to a private HF Dataset
+- **Single-token auth** — One `GATEWAY_TOKEN` for the UI and the API
+- **One-click deploy** — Duplicate the Space, add secrets, wait 5 minutes
+- **MCP support** — Plug in [Model Context Protocol](https://modelcontextprotocol.io/) servers for tools, filesystem, and more
+
+## Table of Contents
+
+- [Features](#features)
+- [Table of Contents](#table-of-contents)
+- [Quick Setup (5 minutes)](#quick-setup-5-minutes)
+  - [1. Duplicate the Space](#1-duplicate-the-space)
+  - [2. Add Your Secrets](#2-add-your-secrets)
+  - [3. Add an AI Provider](#3-add-an-ai-provider)
+  - [4. Start It Up](#4-start-it-up)
+- [What You Get](#what-you-get)
+- [Your Data Is Safe](#your-data-is-safe)
+- [Common Issues](#common-issues)
+- [🔧 Advanced Setup \& Technical Details](#-advanced-setup--technical-details)
+  - [Optional Secrets (Power Users)](#optional-secrets-power-users)
+  - [Configure LLM Provider via Config Editor](#configure-llm-provider-via-config-editor)
+  - [Using the API from Code](#using-the-api-from-code)
+  - [Adding MCP Servers](#adding-mcp-servers)
+  - [Persistence Details](#persistence-details)
+  - [Architecture](#architecture)
+  - [Telegram on HF Spaces (webhook vs polling)](#telegram-on-hf-spaces-webhook-vs-polling)
+    - [⚠️ Private Spaces must use `TELEGRAM_MODE=polling`](#️-private-spaces-must-use-telegram_modepolling)
+    - [Why Telegram needs the Cloudflare proxy at all](#why-telegram-needs-the-cloudflare-proxy-at-all)
+    - [Required keys for Telegram on HF](#required-keys-for-telegram-on-hf)
+  - [Local Testing](#local-testing)
+  - [Reproducing the HF environment locally (`run-local-hf.sh`)](#reproducing-the-hf-environment-locally-run-local-hfsh)
+  - [Extended Troubleshooting](#extended-troubleshooting)
+- [Credits](#credits)
+- [License](#license)
 
 ---
 
@@ -24,9 +63,9 @@ All credit goes to the original creators. This repo just wires them together.
 
 ### 1. Duplicate the Space
 
-[![Duplicate this Space](https://huggingface.co/datasets/huggingface/badges/resolve/main/duplicate-this-space-xl.svg)](https://huggingface.co/spaces/f4b404/hermes?duplicate=true)
+[![Duplicate this Space](https://huggingface.co/datasets/huggingface/badges/resolve/main/duplicate-this-space-xl.svg)](https://huggingface.co/spaces/22f2001388/hermes?duplicate=true)
 
-Click the badge above, name your space → pick **CPU Basic (Free)** → and keep it public(else the .hf.space urls won't work).
+Click the badge above, name your space → pick **CPU Basic (Free)** → and keep it public (otherwise the `.hf.space` URLs won't work).
 
 ### 2. Add Your Secrets
 
@@ -35,8 +74,8 @@ Go to **Settings → Variables and secrets** in your new Space and add these:
 | Secret | What It's For | How to Get It |
 |--------|---------------|---------------|
 | `GATEWAY_TOKEN` | Your password for logging into the chat | Make up any strong password |
-| `HF_TOKEN` | Saves your chats and settings so they don't disappear | [Go here](https://huggingface.co/settings/tokens) → Create new token → Pick write|
-| `CLOUDFLARE_WORKERS_TOKEN` | Keeps your Space awake and lets Telegram work | [Create a token here](https://dash.cloudflare.com/profile/api-tokens) choose **Edit Cloudflare Workers** template |
+| `HF_TOKEN` | Saves your chats and settings so they don't disappear | [Go here](https://huggingface.co/settings/tokens) → Create new token → Pick "write" |
+| `CLOUDFLARE_WORKERS_TOKEN` | Keeps your Space awake and lets Telegram work | [Create a token here](https://dash.cloudflare.com/profile/api-tokens) → choose the **Edit Cloudflare Workers** template |
 
 ### 3. Add an AI Provider
 
@@ -47,6 +86,7 @@ Your agent needs an AI model to talk to. Add one of these API keys as a secret (
 | `OPENAI_API_KEY` | OpenAI (GPT models) |
 | `ANTHROPIC_API_KEY` | Anthropic (Claude models) |
 | `MOONSHOT_API_KEY` | Moonshot / Kimi |
+| `GEMINI_API_KEY` | Google Gemini |
 
 Or configure manually later at `/hm/app/config` inside your Space.
 
@@ -55,22 +95,24 @@ Or configure manually later at `/hm/app/config` inside your Space.
 Hit **Restart this Space** in Hugging Face. Wait 5–8 minutes for the first build.
 
 When you see this in the Logs tab, you're ready:
-```
+
+```text
 HuggingMes + Hermes WebUI router listening on 0.0.0.0:7861
 ```
 
-Open your Space URL (`https://your-name.hf.space`) in a **new tab**, enter your `GATEWAY_TOKEN`, and start chatting.
-Open Hermes Dashboard from here (`https://f4b404-hermes.hf.space/hm/app`)
+Open your Space URL (`https://your-name.hf.space`) in a **new tab**, enter your `GATEWAY_TOKEN`, and start chatting. The Hermes Dashboard is available at `/hm/app` (e.g. `https://22f2001388-hermes.hf.space/hm/app`).
 
 
 > **Pro tip:** Bookmark the direct `*.hf.space` URL — it works better on mobile than the Hugging Face embed.
+>
+> **Want it on your phone?** Use your Space URL (`https://your-name.hf.space`) on Android — install it as a Progressive Web App (PWA) for a native-feeling experience, or just use the URL in any browser for normal chat.
 
 ---
 
 ## What You Get
 
 | URL | What It Is |
-|-----|------------|
+|--------|------------|
 | `/` | **Chat UI** — main interface for talking to your agent |
 | `/hm` | Status dashboard — see what's running |
 | `/hm/app/` | Settings — add AI models, set up cron jobs, manage profiles |
@@ -96,31 +138,27 @@ When `HF_TOKEN` is set:
 | Agent doesn't reply to questions | Check that you added an AI provider API key |
 | Dashboard shows blank pages | Hard-refresh and clear service workers in browser dev tools |
 
----
-
-## Want It on Your Phone?
-
-Use the same (`https://your-name.hf.space`) url in android and then you can install it as Progressive Web App(PWA) or just use the same url on any browser for normal chat using the web.
+For deeper troubleshooting (build failures, Telegram, Cloudflare, sync issues), see [Extended Troubleshooting](#extended-troubleshooting) in the [Advanced Setup](#-advanced-setup--technical-details) section.
 
 ---
 
-# 🔧 Advanced Setup & Technical Details
+## 🔧 Advanced Setup & Technical Details
 
 > **Skip this section if you just want to chat.** The steps above are enough to get started. This part is for developers, power users, and anyone who wants to customize or understand the internals.
 
-## Optional Secrets (Power Users)
+### Optional Secrets (Power Users)
 
 | Secret | What It Does |
 |--------|--------------|
 | `CLOUDFLARE_ACCOUNT_ID` | Explicit Cloudflare account ID if you have multiple |
 | `TELEGRAM_BOT_TOKEN` | Enables the Telegram bridge so you can chat with Hermes from Telegram |
 | `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs allowed to use the bot |
-| `PRIMARY_UI` | Set to `dashboard` to make `/` show the HuggingMes status page instead of the chat UI. Default is `webui`. |
+| `PRIMARY_UI` | Controls what `/` shows. Default `webui` (chat UI). Set to `dashboard` to swap in the HuggingMes status page. |
 | `SYNC_INTERVAL` | Backup cadence in seconds (default 600, range 60–86400) |
 | `HERMES_AGENT_VERSION` | Pin the upstream Hermes Agent base image to a specific tag for reproducibility (default `latest`) |
 | `BACKUP_DATASET_NAME` | Name of the private HF Dataset used for persistence (default `huggingmes-backup`) |
 
-## Configure LLM Provider via Config Editor
+### Configure LLM Provider via Config Editor
 
 > ### ⚠️ Provider keys go in HF Space Secrets, not the dashboard's Env tab
 >
@@ -162,7 +200,7 @@ llm:
 
 If you set the API keys as HF Secrets, you can reference them with `${VAR_NAME}` as shown above. Hermes supports many providers — see the [Hermes Agent docs](https://github.com/NousResearch/hermes-agent) for the full list.
 
-## Using the API from Code
+### Using the API from Code
 
 Your Space exposes an OpenAI-compatible API at `/v1/*`:
 
@@ -189,7 +227,7 @@ resp = client.chat.completions.create(
 )
 ```
 
-## Adding MCP Servers
+### Adding MCP Servers
 
 MCP (Model Context Protocol) servers extend your agent's capabilities. Add them via the config editor at `/hm/app/config`:
 
@@ -206,7 +244,7 @@ mcp:
 
 `uvx` and `npx` are pre-installed in the image.
 
-## Persistence Details
+### Persistence Details
 
 When `HF_TOKEN` is set:
 
@@ -216,7 +254,7 @@ When `HF_TOKEN` is set:
 
 What gets backed up: chat sessions, agent memory, workspace files, profiles, skills, cron jobs, Hermes config. The dataset is private to your HF account.
 
-## Architecture
+### Architecture
 
 Single port (7861) Node.js router fronts multiple backends:
 
@@ -236,27 +274,28 @@ HF Space port 7861
 
 `start.sh` boots Hermes Agent's gateway + dashboard + WebUI as subprocesses, then the router on top. `hermes-sync.py` runs the periodic HF Dataset upload loop. Cloudflare and Telegram setup runs once at boot if their respective secrets are set.
 
-## Local Testing
+### Local Testing
+
+Plain container run (mirrors a public Space):
 
 ```shell
-git clone https://github.com/F4bC0d3/huggingmes-hermes-webui.git
-cd huggingmes-hermes-webui
+git clone https://github.com/22f2001388/hermes.git
+cd hermes
 cp .env.example .env
 # edit .env with GATEWAY_TOKEN and provider API keys (e.g., OPENAI_API_KEY, ANTHROPIC_API_KEY)
-docker build -t huggingmes-hermes-webui .
-docker run --rm -p 7861:7861 --env-file .env huggingmes-hermes-webui
+docker build -t hermes .
+docker run --rm -p 7861:7861 --env-file .env hermes
 # open http://localhost:7861
 ```
 
-## Extended Troubleshooting
+### Extended Troubleshooting
 
 | Symptom | Cause / Fix |
-| --- | --- |
+|--------|-------------|
 | Build fails on `nousresearch/hermes-agent:latest` | Set `HERMES_AGENT_VERSION` to a specific tag and restart |
 | Container Running but `/` returns 502 | Hermes WebUI didn't bind. Check Logs tab for `webui.log` output — usually missing/wrong provider API key or LLM config |
 | `/v1/*` returns 401 | Need `Authorization: Bearer <GATEWAY_TOKEN>` header |
 | `/api/status` 404s in logs | Cosmetic — old browser tab polling. Ignored. |
-| Login loops on `/login` | Browser embedded in HF iframe blocks cookies. Open the Space in a new tab. |
 | Dashboard pages blank or 404 on refresh | Should be fixed by the SPA rewriter in health-server.js. Hard-refresh and unregister service worker if cached: DevTools → Application → Service Workers → Unregister |
 | Space sleeps after a few hours | Free tier limitation. Add `CLOUDFLARE_WORKERS_TOKEN` to provision a keep-alive cron worker |
 | Telegram bot doesn't respond | HF Spaces blocks `api.telegram.org` egress. Add `CLOUDFLARE_WORKERS_TOKEN` to auto-provision an outbound proxy |
@@ -265,12 +304,15 @@ docker run --rm -p 7861:7861 --env-file .env huggingmes-hermes-webui
 
 ## Credits
 
-*   **[Nous Research](https://nousresearch.com/)** for **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** — the agent runtime, the persistent memory system, the multi-provider LLM routing, the cron and skills systems. None of this exists without their work.
-*   **[@nesquena](https://github.com/nesquena)** for **[Hermes WebUI](https://github.com/nesquena/hermes-webui)** — the chat interface you actually see and use. Three-panel layout, SSE streaming, slash commands, profile management, theme system, mobile responsive design — all theirs.
-*   **[@somratpro](https://github.com/somratpro)** for **[HuggingMes](https://github.com/somratpro/HuggingMes)** — the HF Space packaging, the HF Dataset backup engine (`hermes-sync.py`), the Cloudflare proxy and keepalive setup, the Telegram integration, and the gateway auth wrapper.
+A fork combining four open-source projects into one Hugging Face Space:
 
-This repo's only contribution is the integration layer: a Node.js router that fronts both UIs on a single HF Space port, unified auth where one `GATEWAY_TOKEN` gates everything, and minor tweaks to `start.sh` to launch hermes-webui alongside the existing HuggingMes processes. If you find this useful, star the upstream projects.
+*   **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** by **[Nous Research](https://nousresearch.com/)** — agent runtime: persistent memory, multi-provider LLM routing, cron, skills.
+*   **[Hermes WebUI](https://github.com/nesquena/hermes-webui)** by **[@nesquena](https://github.com/nesquena)** — the chat interface: three-panel layout, SSE streaming, slash commands, profiles, themes, mobile.
+*   **[HuggingMes](https://github.com/somratpro/HuggingMes)** by **[@somratpro](https://github.com/somratpro)** — HF Space packaging: Dataset backup engine (`hermes-sync.py`), Cloudflare proxy + keepalive, Telegram integration, gateway auth.
+*   **[huggingmes-hermes-webui](https://github.com/F4bC0d3/huggingmes-hermes-webui)** by **[@F4bC0d3](https://github.com/F4bC0d3)** — the integration this fork builds on: single-port Node.js router, unified `GATEWAY_TOKEN` auth, `start.sh` wiring.
+
+**This fork adds** a working Telegram bridge for HF Spaces — Cloudflare-proxy `base_url` re-sync, polling mode for private Spaces, connect/retry hardening in `start.sh` and `cloudflare-proxy-setup.py` — plus expanded deployment docs. If this helps you, star the upstream projects.
 
 ## License
 
-MIT — same as all upstream projects.
+MIT — see [`LICENSE`](./LICENSE). Original copyright notices and attributions are preserved in [`NOTICE`](./NOTICE).

@@ -1,0 +1,39 @@
+huggingmes-hermes-webui
+Copyright (c) 2026 Ritesh Kumar Pal
+
+This product is a fork/derivative work and bundles or builds upon the following
+third-party open-source projects. All are MIT-licensed; their original
+copyright notices are reproduced here as required by the MIT License.
+
+--------------------------------------------------------------------------------
+Hermes Agent
+Copyright (c) 2025 Nous Research
+License: MIT
+https://github.com/NousResearch/hermes-agent
+
+--------------------------------------------------------------------------------
+Hermes WebUI
+Copyright (c) 2025 Hermes Web UI Contributors
+License: MIT
+https://github.com/nesquena/hermes-webui
+
+--------------------------------------------------------------------------------
+HuggingMes
+Copyright (c) 2026 Somrat
+License: MIT
+https://github.com/somratpro/HuggingMes
+
+--------------------------------------------------------------------------------
+huggingmes-hermes-webui (upstream integration this fork is based on)
+Copyright (c) 2026 F4bC0d3
+License: MIT
+https://github.com/F4bC0d3/huggingmes-hermes-webui
+
+--------------------------------------------------------------------------------
+Vendored files retained from the upstream HuggingMes / F4bC0d3 integration
+(hermes-sync.py, cloudflare-proxy-setup.py, cloudflare-keepalive-setup.py, and
+portions of start.sh and health-server.js) remain under their original MIT
+licenses from the projects listed above.
+
+A full copy of the MIT License text is in the LICENSE file at the root of this
+repository.

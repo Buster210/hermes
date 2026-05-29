@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Create or reuse Cloudflare Workers for Telegram proxy and Space keep-awake.
-
-Vendored verbatim from github.com/somratpro/HuggingMes.
-"""
+"""Create/reuse Cloudflare Workers for Telegram proxy + keep-awake. Vendored from HuggingMes."""
 
 import json
 import os
@@ -16,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 API_BASE = "https://api.cloudflare.com/client/v4"
-ENV_FILE = Path("/tmp/huggingmes-cloudflare-proxy.env")
+ENV_FILE = Path("/tmp/hermes-cloudflare-proxy.env")
 DEFAULT_ALLOWED = [
     "api.telegram.org",
     "discord.com",
@@ -54,7 +51,7 @@ def cf_request(method: str, path: str, token: str, body: bytes | None = None, co
 def slugify(value: str) -> str:
     cleaned = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
     cleaned = re.sub(r"-{2,}", "-", cleaned)
-    return (cleaned or "huggingmes-proxy")[:63].rstrip("-")
+    return (cleaned or "hermes-proxy")[:63].rstrip("-")
 
 
 def derive_worker_name() -> str:
@@ -64,7 +61,7 @@ def derive_worker_name() -> str:
     space_host = os.environ.get("SPACE_HOST", "").strip()
     if space_host:
         return slugify(f"{space_host.replace('.hf.space', '')}-proxy")
-    return "huggingmes-proxy"
+    return "hermes-proxy"
 
 
 def render_worker(secret_value: str, allowed_targets: list[str], allow_proxy_all: bool) -> str:

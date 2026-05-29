@@ -1,26 +1,7 @@
 "use strict";
 
-/**
- * HuggingMes + Hermes WebUI — single-port router on HF Space port 7861.
- *
- * Routes:
- *   /login                -> HuggingMes login (password = GATEWAY_TOKEN)
- *   /health /status       -> JSON health (unauthenticated — for HF probes + keepalive)
- *   /hm  /hm/*            -> HuggingMes status page + app (auth-gated)
- *   /hmd /hmd/*           -> Hermes dashboard passthrough for off-Space
- *                            workspaces (no router auth — dashboard's own
- *                            session token gates writes; opt-in by URL)
- *   /dashboard            -> redirect to /hm
- *   /v1  /v1/*            -> Hermes gateway (bearer auth; HTML => login redirect)
- *   /telegram  /telegram/*-> Telegram webhook (unauthenticated; Telegram needs to reach it)
- *   everything else       -> Hermes WebUI (nesquena/hermes-webui) as the primary UI
- *                           WebUI handles its own login at /login-... no, wait: WebUI
- *                           also exposes /login. We keep HuggingMes' login at /login
- *                           so the shared GATEWAY_TOKEN gates both.
- *
- * Based on github.com/somratpro/HuggingMes with added WebUI routing as the
- * primary UI.
- */
+// Single-port router on HF Space port 7861. GATEWAY_TOKEN gates both
+// Hermes admin and Hermes WebUI via shared cookie/bearer auth.
 
 const http = require("http");
 const fs = require("fs");
@@ -36,26 +17,19 @@ const GATEWAY_HOST = "127.0.0.1";
 const startTime = Date.now();
 const API_SERVER_KEY = process.env.API_SERVER_KEY || "";
 const HM_PREFIX = "/hm";
-// Dashboard passthrough for off-Space workspaces (e.g. hermes-workspace
-// running on a laptop). Anything under /hmd/* is forwarded directly to the
-// internal dashboard with no router-level auth — the dashboard's own
-// ephemeral session token is the only gate. This is intentional: the
-// workspace scrapes that token from /hmd/ and then sends it as the bearer
-// on /hmd/api/* requests, exactly mirroring the dashboard's normal flow.
-//
-// Implication: anyone who can reach this Space's URL can call the dashboard
-// API (sessions, skills, config). If you don't need remote workspace access,
-// don't share the Space URL or set up an upstream auth layer.
+// Off-Space dashboard passthrough — workspace scrapes /hmd/ token,
+// sends bearer on /hmd/api/*. No router-level auth (dashboard's own
+// session token gates writes). Reachable URL = reachable API.
 const HMD_PREFIX = "/hmd";
 const LOGIN_PATH = "/hm/login";
-const SESSION_COOKIE = "huggingmes_session";
+const SESSION_COOKIE = "hermes_session";
 const PRIMARY_UI = (process.env.PRIMARY_UI || "webui").toLowerCase();
 
-const SYNC_STATUS_FILE = "/tmp/huggingmes-sync-status.json";
+const SYNC_STATUS_FILE = "/tmp/hermes-sync-status.json";
 const CLOUDFLARE_KEEPALIVE_STATUS_FILE =
-  "/tmp/huggingmes-cloudflare-keepalive-status.json";
+  "/tmp/hermes-cloudflare-keepalive-status.json";
 
-/* ── Port probing + auth ──────────────────────────────────────────── */
+// --- Port probing + auth ---
 
 function canConnect(port, host = GATEWAY_HOST, timeoutMs = 600) {
   return new Promise((resolve) => {
@@ -91,7 +65,7 @@ function expectedSessionValue() {
   if (!API_SERVER_KEY) return "";
   return crypto
     .createHmac("sha256", API_SERVER_KEY)
-    .update("huggingmes-session-v1")
+    .update("hermes-session-v1")
     .digest("hex");
 }
 
@@ -162,6 +136,17 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function isDashboardAssetPath(path) {
+  return (
+    path.startsWith("/assets/") ||
+    path.startsWith("/ds-assets/") ||
+    path.startsWith("/dashboard-plugins/") ||
+    path.startsWith("/api/") ||
+    path === "/favicon.ico" ||
+    /\.[a-z0-9]{1,6}$/i.test(path)
+  );
+}
+
 function readRequestBody(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -177,7 +162,7 @@ function readRequestBody(req, limit = 64 * 1024) {
   });
 }
 
-/* ── Login page ───────────────────────────────────────────────────── */
+// --- Login page ---
 
 function renderLoginPage(nextPath, errorMessage = "") {
   const safeNext = sanitizeNext(nextPath, "/");
@@ -189,7 +174,7 @@ function renderLoginPage(nextPath, errorMessage = "") {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HuggingMes + Hermes WebUI — Login</title>
+  <title>Hermes WebUI — Login</title>
   <style>
     :root { color-scheme: dark; --bg:#10141f; --panel:#171d2b; --line:#293246; --text:#f4f7fb; --muted:#9aa7bd; --bad:#ef4444; --accent:#38bdf8; }
     * { box-sizing:border-box; }
@@ -205,7 +190,7 @@ function renderLoginPage(nextPath, errorMessage = "") {
 </head>
 <body>
   <main>
-    <h1>HuggingMes Admin</h1>
+    <h1>Hermes Admin</h1>
     <p>Enter the <code>GATEWAY_TOKEN</code> from your Space secrets to access the status dashboard.<br>For the Hermes chat UI, go to <a href="/" style="color:var(--accent)">/</a>.</p>
     ${errorHtml}
     <form method="post" action="${LOGIN_PATH}">
@@ -441,7 +426,7 @@ function proxyDashboard(req, res) {
   req.pipe(upstream);
 }
 
-/* ── Status JSON + HuggingMes status page ─────────────────────────── */
+/* ── Status JSON + Hermes status page ─────────────────────────── */
 
 function formatUptime(ms) {
   const total = Math.floor(ms / 1000);
@@ -554,8 +539,7 @@ function renderStatusPage(data) {
   const backupDetail = data.backup?.message
     ? escapeHtml(data.backup.message)
     : "No status yet";
-  // Extra one-line warning row for known-loud failure modes (currently:
-  // ephemeral .env on a Space). hermes-sync.py emits this via warning.message.
+  // Warning banner for known failure modes (e.g. ephemeral .env on Space).
   const backupWarning = data.backup?.warning?.message
     ? `<div class="tile-warning">${escapeHtml(data.backup.warning.message)}</div>`
     : "";
@@ -624,7 +608,7 @@ function renderStatusPage(data) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HuggingMes + Hermes WebUI</title>
+  <title>Hermes WebUI</title>
   <style>
     :root { color-scheme: dark; --bg:#08080f; --panel:#12111b; --line:#26243a; --text:#f6f4ff; --muted:#7f7a9e; --soft:#b8b3d7; --good:#22c55e; --warn:#f5c542; --bad:#fb7185; --accent:#6557df; }
     * { box-sizing:border-box; }
@@ -666,7 +650,7 @@ function renderStatusPage(data) {
 <body>
   <main>
     <header>
-      <h1>HuggingMes + Hermes WebUI</h1>
+      <h1>Hermes WebUI</h1>
       <div class="subtitle">Self-hosted Hermes Agent on HF Spaces</div>
     </header>
     <div class="row">
@@ -688,20 +672,20 @@ function renderStatusPage(data) {
 </html>`;
 }
 
-/* ── Server ───────────────────────────────────────────────────────── */
+// --- Server ---
 
 const server = http.createServer(async (req, res) => {
   const parsed = new URL(req.url, "http://localhost");
   const path = parsed.pathname;
 
-  // 1. /hm/login — HuggingMes admin login (cookie-based, gates /hm/*).
-  //    hermes-webui handles its own /login at the catch-all below.
+  // /hm/login — Hermes admin login (cookie-based, gates /hm/*).
+  // WebUI handles its own /login at the catch-all.
   if (path === LOGIN_PATH) {
     await handleLogin(req, res, parsed);
     return;
   }
 
-  // 2. /health — unauthenticated; HF Spaces probes + Cloudflare keepalive.
+  // /health — unauthenticated; HF probes + keepalive.
   if (path === "/health") {
     const data = await statusPayload();
     res.writeHead(data.ok ? 200 : 503, { "content-type": "application/json" });
@@ -716,7 +700,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 3. /status — unauthenticated JSON status dump.
+  // /status — unauthenticated JSON dump.
   if (path === "/status" || path === "/api/status") {
     const data = await statusPayload();
     res.writeHead(200, { "content-type": "application/json" });
@@ -724,13 +708,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 4. /telegram — webhook endpoint; no auth (Telegram can't do our cookie).
+  // /telegram — no auth (Telegram can't do our cookie).
   if (path === "/telegram" || path.startsWith("/telegram/")) {
     proxyRequest(req, res, TELEGRAM_WEBHOOK_PORT);
     return;
   }
 
-  // 5. /v1/* — Hermes gateway OpenAI-compatible API.
+  // /v1/* — Hermes gateway (OpenAI-compatible).
   if (path === "/v1" || path.startsWith("/v1/")) {
     if (!isAuthorized(req)) {
       if (wantsHtml(req)) {
@@ -757,7 +741,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 6. /hm — HuggingMes status page.
+  // /hm — Hermes status page.
   if (path === HM_PREFIX || path === `${HM_PREFIX}/`) {
     if (!requireAuth(req, res)) return;
     const data = await statusPayload();
@@ -767,32 +751,21 @@ const server = http.createServer(async (req, res) => {
   }
 
   // /hmd/* — Off-Space dashboard passthrough.
-  //
-  // Forwards verbatim to the internal Hermes dashboard on DASHBOARD_PORT,
-  // including its /api/* endpoints, /assets/*, root HTML (which carries the
-  // ephemeral session token), and WebSocket upgrades. Workspace clients
-  // (e.g. hermes-workspace) point HERMES_DASHBOARD_URL at
-  //   https://<space>/hmd
-  // and the workspace's own scrape-the-token-from-root-HTML logic just
-  // works because /hmd/ returns the unmodified dashboard index.
-  //
-  // SECURITY: this prefix has no router-level auth on purpose — the
-  // dashboard's own session token gates writes. If you need an extra layer,
-  // wrap your Space behind a Cloudflare Access policy or remove this
-  // handler.
+  // Forwards verbatim to DASHBOARD_PORT (/api/*, /assets/*, root HTML).
+  // No router-level auth: dashboard's session token gates writes.
   if (path === HMD_PREFIX || path.startsWith(`${HMD_PREFIX}/`)) {
     proxyRequest(req, res, DASHBOARD_PORT, (p) => p.replace(HMD_PREFIX, "") || "/");
     return;
   }
 
-  // /hm/app/* -> Hermes dashboard (SPA with HTML rewriting for base path)
+  // /hm/app/* — Hermes dashboard (SPA with HTML rewriting for base path).
   if (path === `${HM_PREFIX}/app` || path.startsWith(`${HM_PREFIX}/app/`)) {
     if (!requireAuth(req, res)) return;
     proxyDashboard(req, res);
     return;
   }
 
-  // /hm/status -> JSON
+  // /hm/status — JSON.
   if (path === `${HM_PREFIX}/status`) {
     if (!requireAuth(req, res)) return;
     const data = await statusPayload();
@@ -801,14 +774,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Legacy /dashboard -> /hm
+  // Legacy /dashboard -> /hm.
   if (path === "/dashboard" || path === "/dashboard/") {
     redirect(res, `${HM_PREFIX}${parsed.search}`);
     return;
   }
 
-  // Root-path dashboard routes (config, env, providers, etc.) that users
-  // type or bookmark without the /hm/app prefix. Redirect them there.
+  // Root-path dashboard routes without /hm/app prefix -> redirect.
   const dashboardRootRoutes = new Set([
     "/config",
     "/env",
@@ -829,15 +801,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 6b. Root-path requests whose Referer came from /hm/app/* must go to
-  //     the dashboard, not WebUI. This covers:
-  //       - Absolute assets    (/assets/*, /ds-assets/*, /dashboard-plugins/*)
-  //       - API calls          (/api/*) when dashboard code uses absolute paths
-  //       - Favicon            (/favicon.ico)
-  //       - WebSocket upgrades from dashboard pages
-  //       - File downloads     (any extensioned path referenced by dashboard)
-  //     Both the Hermes dashboard AND hermes-webui use /api/* internally,
-  //     so the Referer is the only reliable way to disambiguate.
+  // Referer-based routing: dashboard pages request /assets/*, /api/*, etc.
+  // with absolute paths. Disambiguate from WebUI's same-named endpoints.
   const refererPath = (() => {
     const ref = String(req.headers.referer || "");
     if (!ref) return "";
@@ -849,46 +814,20 @@ const server = http.createServer(async (req, res) => {
   })();
   const refererIsDashboard = refererPath.startsWith(`${HM_PREFIX}/app`);
 
-  if (refererIsDashboard) {
-    // Anything with a Referer from the dashboard goes to the dashboard,
-    // *except* requests that explicitly start with /webui (escape hatch).
-    if (!path.startsWith("/webui")) {
-      if (!requireAuth(req, res)) return;
-      // Assets must NOT get the SPA fallback; pass them through as-is.
-      const parsed2 = new URL(req.url, "http://localhost");
-      const looksLikeAsset =
-        path.startsWith("/assets/") ||
-        path.startsWith("/ds-assets/") ||
-        path.startsWith("/dashboard-plugins/") ||
-        path.startsWith("/api/") ||
-        path === "/favicon.ico" ||
-        /\.[a-z0-9]{1,6}$/i.test(path);
-      if (looksLikeAsset) {
-        proxyRequest(req, res, DASHBOARD_PORT);
-      } else {
-        // Unlikely: a dashboard-referrer request for a non-asset, non-/hm
-        // path. Treat as a dashboard sub-route.
-        proxyDashboard(req, res);
-      }
-      return;
+  // /webui in the path escapes dashboard routing — falls through to WebUI proxy below.
+  if (refererIsDashboard && !path.startsWith("/webui")) {
+    if (!requireAuth(req, res)) return;
+    if (isDashboardAssetPath(path)) {
+      proxyRequest(req, res, DASHBOARD_PORT);
+    } else {
+      proxyDashboard(req, res);
     }
+    return;
   }
 
-  // 6c. /api/* routes — these are WebUI API calls when Referer isn't the
-  //     dashboard. Fall through to the catch-all below.
-  //
-  // Exception: hermes-workspace probes for the *legacy* enhanced-fork chat
-  // endpoint at POST /api/sessions/<id>/chat/stream. Without this rule the
-  // request falls through to WebUI's catch-all, which doesn't 404 it
-  // cleanly, so the workspace's detector sets `enhancedChat=true`, sends
-  // chat there at runtime, and the UI surfaces a generic "Authentication
-  // error". Returning an explicit 404 here makes the workspace fall back
-  // to the OpenAI-compatible /v1/chat/completions path on the gateway —
-  // which is the only chat surface this Space actually exposes.
-  //
-  // Anything the dashboard or WebUI legitimately need under /api/sessions/
-  // already has a more specific match above (referer check / /hmd
-  // passthrough), so this only fires for cross-origin probes.
+  // /api/sessions/<id>/chat/stream — 404 for cross-origin probes
+  // so hermes-workspace falls back to /v1/chat/completions instead
+  // of trying the legacy enhanced-fork endpoint.
   if (
     /^\/api\/sessions\/[^/]+\/chat\/stream\/?$/.test(path) &&
     !refererIsDashboard
@@ -907,8 +846,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 7. Anything else -> Hermes WebUI (primary UI) OR HuggingMes status page.
-  //    WebUI handles its own auth internally via HERMES_WEBUI_PASSWORD.
+  // Dashboard or WebUI for "/" depending on PRIMARY_UI.
   if (PRIMARY_UI === "dashboard" && path === "/") {
     if (!requireAuth(req, res)) return;
     const data = await statusPayload();
@@ -917,14 +855,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Catch-all -> WebUI. Don't gate at the router level: WebUI has its own
-  // password login. GATEWAY_TOKEN *is* the WebUI password (start.sh sets
-  // HERMES_WEBUI_PASSWORD=$GATEWAY_TOKEN).
+  // Catch-all -> WebUI. WebUI has its own password login (GATEWAY_TOKEN).
   proxyRequest(req, res, WEBUI_PORT);
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`HuggingMes + Hermes WebUI router listening on 0.0.0.0:${PORT}`);
+  console.log(`Hermes WebUI router listening on 0.0.0.0:${PORT}`);
 });
 
 /* ── WebSocket upgrade handling ─────────────────────────────────────

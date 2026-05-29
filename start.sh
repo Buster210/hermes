@@ -3,13 +3,7 @@ set -euo pipefail
 
 umask 0077
 
-# ══════════════════════════════════════════════════════════════════════
-# HuggingMes + Hermes WebUI — integrated Hermes Agent stack for HF Spaces
-#   Based on github.com/somratpro/HuggingMes, with Hermes WebUI
-#   (github.com/nesquena/hermes-webui) as the primary UI.
-# ══════════════════════════════════════════════════════════════════════
-
-APP_DIR="${HUGGINGMES_APP_DIR:-/opt/huggingmes}"
+APP_DIR="${HERMES_APP_DIR:-/opt/hermes}"
 WEBUI_REPO="${HERMES_WEBUI_REPO:-/opt/hermes-webui}"
 HERMES_HOME="${HERMES_HOME:-/opt/data}"
 
@@ -20,8 +14,8 @@ TELEGRAM_WEBHOOK_PORT="${TELEGRAM_WEBHOOK_PORT:-8765}"
 WEBUI_PORT="${HERMES_WEBUI_PORT:-8787}"
 
 SYNC_INTERVAL="${SYNC_INTERVAL:-60}"
-BACKUP_DATASET="${BACKUP_DATASET_NAME:-huggingmes-backup}"
-CF_PROXY_ENV_FILE="/tmp/huggingmes-cloudflare-proxy.env"
+BACKUP_DATASET="${BACKUP_DATASET_NAME:-hermes-backup}"
+CF_PROXY_ENV_FILE="/tmp/hermes-cloudflare-proxy.env"
 
 export HERMES_HOME
 export API_SERVER_ENABLED="${API_SERVER_ENABLED:-true}"
@@ -33,7 +27,7 @@ export HERMES_WEBUI_PORT="$WEBUI_PORT"
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
-echo "  ║  🪽 HuggingMes + Hermes WebUI Gateway    ║"
+echo "  ║  🪽 Hermes WebUI Gateway    ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""
 
@@ -96,7 +90,7 @@ else
   echo "HF_TOKEN not set - dataset persistence is disabled."
 fi
 
-# ── Cloudflare proxy (optional) ───────────────────────────────────────
+# ── Cloudflare proxy (optional) ──
 CLOUDFLARE_WORKERS_TOKEN="${CLOUDFLARE_WORKERS_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
 export CLOUDFLARE_WORKERS_TOKEN
 if [ -n "${CLOUDFLARE_WORKERS_TOKEN:-}" ] || [ -n "${CLOUDFLARE_PROXY_URL:-}" ]; then
@@ -127,7 +121,7 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${SPACE_HOST:-}" ] && [ -z "${TELEG
 fi
 
 if [ -n "${TELEGRAM_WEBHOOK_URL:-}" ] && [ -z "${TELEGRAM_WEBHOOK_SECRET:-}" ]; then
-  SECRET_FILE="$HERMES_HOME/.huggingmes-telegram-webhook-secret"
+  SECRET_FILE="$HERMES_HOME/.hermes-telegram-webhook-secret"
   if [ -f "$SECRET_FILE" ]; then
     TELEGRAM_WEBHOOK_SECRET="$(cat "$SECRET_FILE")"
   else
@@ -142,7 +136,7 @@ PY
   export TELEGRAM_WEBHOOK_SECRET
 fi
 
-# ── Provider-prefix mapping (HuggingMes convention) ───────────────────
+# ── Provider-prefix mapping (Hermes convention) ───────────────────
 MODEL_INPUT="${HERMES_MODEL:-${LLM_MODEL:-}}"
 MODEL_FOR_CONFIG="$MODEL_INPUT"
 PROVIDER_FOR_CONFIG="${HERMES_INFERENCE_PROVIDER:-auto}"
@@ -358,7 +352,7 @@ import json, os, urllib.request
 body = json.dumps({
     "event": "restart",
     "status": "success",
-    "message": "HuggingMes + Hermes WebUI has started.",
+    "message": "Hermes WebUI has started.",
     "model": os.environ.get("MODEL_FOR_CONFIG", ""),
 }).encode()
 req = urllib.request.Request(os.environ["WEBHOOK_URL"], data=body, method="POST",
@@ -398,9 +392,8 @@ if [ "$ready" != "true" ]; then
   exit 1
 fi
 
-# ── Launch Hermes WebUI (nesquena/hermes-webui) ───────────────────────
-# Points WebUI at the already-running Hermes agent venv and persists state
-# under $HERMES_HOME/webui so hermes-sync.py backs it up.
+# ── Launch WebUI ──
+# Points at the agent venv, persists under $HERMES_HOME/webui for backup.
 export HERMES_WEBUI_AGENT_DIR="/opt/hermes"
 export HERMES_WEBUI_PYTHON="/opt/hermes/.venv/bin/python"
 export HERMES_WEBUI_HOST="127.0.0.1"
@@ -416,7 +409,7 @@ echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}..."
    tee -a "$HERMES_HOME/logs/webui.log") &
 WEBUI_PID=$!
 
-# Wait for WebUI to bind its port (non-fatal on timeout — router handles it)
+# Non-fatal timeout — router handles unreachable.
 WEBUI_READY_TIMEOUT="${WEBUI_READY_TIMEOUT:-60}"
 for ((i=0; i<WEBUI_READY_TIMEOUT; i++)); do
   if (echo > "/dev/tcp/127.0.0.1/${WEBUI_PORT}") 2>/dev/null; then
@@ -436,7 +429,7 @@ if [ -n "${HF_TOKEN:-}" ]; then
   python3 -u "$APP_DIR/hermes-sync.py" loop &
 fi
 
-# ── Wait on the gateway (primary supervision target) ──────────────────
+# ── Wait on gateway ──
 wait "$GATEWAY_PID"
 
 if [ -n "${HF_TOKEN:-}" ]; then
