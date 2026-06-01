@@ -13,9 +13,9 @@ services:
     environment:
       # Core
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
-      LLM_MODEL: ${LLM_MODEL:-openrouter/anthropic/claude-sonnet-4}
+      LLM_MODEL: ${LLM_MODEL:-google/gemini-flash-lite-latest}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      SPACE_HOST: ${SPACE_HOST:-localhost:7861}
+      SPACE: ${SPACE:-http://localhost:7861}
       # WebUI
       PRIMARY_UI: ${PRIMARY_UI:-webui}
       HERMES_WEBUI_PASSWORD: ${HERMES_WEBUI_PASSWORD:-}

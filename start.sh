@@ -3,9 +3,49 @@ set -euo pipefail
 
 umask 0077
 
+# ── Logging functions ──────────────────────────────────────────────────────
+log() { echo "$*"; }
+warn() { echo "WARN: $*" >&2; }
+die() {
+	echo "FATAL: $*" >&2
+	exit 1
+}
+
+echo ""
+echo "  ╔══════════════════════════════════════════╗"
+echo "  ║                Hermes                    ║"
+echo "  ╚══════════════════════════════════════════╝"
+echo ""
+
 APP_DIR="${HERMES_APP_DIR:-/opt/hermes}"
 WEBUI_REPO="${HERMES_WEBUI_REPO:-/opt/hermes-webui}"
-HERMES_HOME="${HERMES_HOME:-/opt/data}"
+HERMES_DATA_ROOT="${HERMES_HOME:-/opt/data}"
+
+# Per-agent state isolation (support multiple agents)
+AGENT_NAME="${AGENT_NAME:-primary}"
+HERMES_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}/.hermes"
+WORKSPACE_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}/workspace"
+
+log "Agent: $AGENT_NAME"
+log "State: $HERMES_HOME"
+
+# ── Platform detection ────────────────────────────────────────────────────────
+if [ -n "${SPACE_ID:-}" ]; then
+	PLATFORM="hf"
+elif [ -n "${RENDER:-}" ]; then
+	PLATFORM="render"
+else
+	PLATFORM="local"
+fi
+log "Detected platform: $PLATFORM"
+
+# On cloud (HF/Render), disable Telegram IP-fallback transport that bypasses base_url.
+# Hermes auto-discovers Telegram datacenter IPs and dials api.telegram.org directly,
+# which hangs where the host is blocked. Disabling leaves a plain client that respects base_url.
+if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
+	export HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=true
+	log "Telegram IP-fallback disabled (base_url-only routing on $PLATFORM)"
+fi
 
 PUBLIC_PORT="${PORT:-7861}"
 GATEWAY_API_PORT="${API_SERVER_PORT:-8642}"
@@ -25,30 +65,25 @@ export GATEWAY_HEALTH_URL="${GATEWAY_HEALTH_URL:-http://127.0.0.1:${GATEWAY_API_
 export TELEGRAM_WEBHOOK_PORT
 export HERMES_WEBUI_PORT="$WEBUI_PORT"
 
-echo ""
-echo "  ╔══════════════════════════════════════════╗"
-echo "  ║  🪽 Hermes WebUI Gateway    ║"
-echo "  ╚══════════════════════════════════════════╝"
-echo ""
-
 # ── Unified auth: GATEWAY_TOKEN drives everything ─────────────────────
 if [ -z "${API_SERVER_KEY:-}" ]; then
-  if [ -n "${GATEWAY_TOKEN:-}" ]; then
-    export API_SERVER_KEY="$GATEWAY_TOKEN"
-  else
-    API_SERVER_KEY="$(python3 - <<'PY'
+	if [ -n "${GATEWAY_TOKEN:-}" ]; then
+		export API_SERVER_KEY="$GATEWAY_TOKEN"
+	else
+		API_SERVER_KEY="$(
+			python3 - <<'PY'
 import secrets
 print(secrets.token_urlsafe(32))
 PY
-)"
-    export API_SERVER_KEY
-    echo "GATEWAY_TOKEN not set - generated an ephemeral token for this boot."
-  fi
+		)"
+		export API_SERVER_KEY
+		echo "GATEWAY_TOKEN not set - generated an ephemeral token for this boot."
+	fi
 fi
 
 # Same token becomes Hermes WebUI's login password (unified auth).
 if [ -n "${GATEWAY_TOKEN:-}" ]; then
-  export HERMES_WEBUI_PASSWORD="${HERMES_WEBUI_PASSWORD:-$GATEWAY_TOKEN}"
+	export HERMES_WEBUI_PASSWORD="${HERMES_WEBUI_PASSWORD:-$GATEWAY_TOKEN}"
 fi
 
 # ── Setup state dirs ──────────────────────────────────────────────────
@@ -60,15 +95,15 @@ mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,wo
 # Strategy: if a log is >5MB, rename to .1 (overwriting any previous .1)
 # and start fresh. Cheap, deterministic, no cron needed.
 if [ -d "$HERMES_HOME/logs" ]; then
-  for f in "$HERMES_HOME/logs"/*.log; do
-    [ -f "$f" ] || continue
-    sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
-    if [ "$sz" -gt 5242880 ]; then
-      mv -f "$f" "${f}.1"
-      : > "$f"
-      echo "rotated $(basename "$f") ($sz bytes -> .1)"
-    fi
-  done
+	for f in "$HERMES_HOME/logs"/*.log; do
+		[ -f "$f" ] || continue
+		sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+		if [ "$sz" -gt 5242880 ]; then
+			mv -f "$f" "${f}.1"
+			: >"$f"
+			echo "rotated $(basename "$f") ($sz bytes -> .1)"
+		fi
+	done
 fi
 
 # Expose hermes CLI to login shells
@@ -77,63 +112,104 @@ ln -sfn /opt/hermes/.venv/bin/hermes "$HERMES_HOME/.local/bin/hermes"
 
 # Redirect Hermes plugin dir into volume
 if [ ! -L "${HOME}/.hermes/plugins" ]; then
-  mkdir -p "${HOME}/.hermes"
-  rm -rf "${HOME}/.hermes/plugins"
-  ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
+	mkdir -p "${HOME}/.hermes"
+	rm -rf "${HOME}/.hermes/plugins"
+	ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
 fi
 
 # ── Restore state from HF Dataset ─────────────────────────────────────
 if [ -n "${HF_TOKEN:-}" ]; then
-  echo "Restoring Hermes state from HF Dataset..."
-  python3 "$APP_DIR/hermes-sync.py" restore || true
+	echo "Restoring Hermes state from HF Dataset"
+	python3 "$APP_DIR/hermes-sync.py" restore || true
 else
-  echo "HF_TOKEN not set - dataset persistence is disabled."
+	echo "HF_TOKEN not set - dataset persistence is disabled."
 fi
 
 # ── Cloudflare proxy (optional) ──
 CLOUDFLARE_WORKERS_TOKEN="${CLOUDFLARE_WORKERS_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
 export CLOUDFLARE_WORKERS_TOKEN
 if [ -n "${CLOUDFLARE_WORKERS_TOKEN:-}" ] || [ -n "${CLOUDFLARE_PROXY_URL:-}" ]; then
-  export CLOUDFLARE_PROXY_DEBUG="${CLOUDFLARE_PROXY_DEBUG:-false}"
-  echo "Preparing Cloudflare Telegram proxy..."
-  python3 "$APP_DIR/cloudflare-proxy-setup.py" || true
-  if [ -f "$CF_PROXY_ENV_FILE" ]; then
-    . "$CF_PROXY_ENV_FILE"
-  fi
+	export CLOUDFLARE_PROXY_DEBUG="${CLOUDFLARE_PROXY_DEBUG:-false}"
+	echo "Preparing Cloudflare Telegram proxy"
+	python3 "$APP_DIR/cloudflare-proxy-setup.py" || true
+	if [ -f "$CF_PROXY_ENV_FILE" ]; then
+		. "$CF_PROXY_ENV_FILE"
+	fi
 fi
 
 if [ -n "${CLOUDFLARE_WORKERS_TOKEN:-}" ]; then
-  echo "Preparing Cloudflare Keepalive worker..."
-  python3 "$APP_DIR/cloudflare-keepalive-setup.py" || true
+	echo "Preparing Cloudflare Keepalive worker"
+	python3 "$APP_DIR/cloudflare-keepalive-setup.py" || true
 fi
 
 # ── Telegram env normalisation (aliases + webhook URL + secret) ───────
 if [ -n "${TELEGRAM_USER_IDS:-}" ] && [ -z "${TELEGRAM_ALLOWED_USERS:-}" ]; then
-  export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_IDS"
+	export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_IDS"
 elif [ -n "${TELEGRAM_USER_ID:-}" ] && [ -z "${TELEGRAM_ALLOWED_USERS:-}" ]; then
-  export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_ID"
+	export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_ID"
+fi
+
+# ── Telegram home channel auto-seed ───────────────────────────────────
+# Hermes prompts "/sethome" on the first message whenever a platform's home
+# channel is unset — its gateway reads os.getenv("TELEGRAM_HOME_CHANNEL") and,
+# when empty, tells the user to run /sethome. /sethome itself only persists
+# TELEGRAM_HOME_CHANNEL=<chat_id> into $HERMES_HOME/.env, which Hermes loads
+# with override=True on every start. A fresh container has no such value, so
+# the prompt returns each pull. Seed it once from the first allowed user (a
+# Telegram DM's chat_id equals the user id) so cron/cross-platform delivery
+# has a target with zero interaction. We only seed when the key is absent, so
+# a later /sethome (or Env-tab edit) rewrites the line and always wins.
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+	HERMES_ENV_FILE="$HERMES_HOME/.env"
+	if [ -f "$HERMES_ENV_FILE" ] && grep -q '^TELEGRAM_HOME_CHANNEL=' "$HERMES_ENV_FILE"; then
+		: # already set (prior /sethome, Env tab, or restored backup) — leave it
+	else
+		TG_HOME="${TELEGRAM_HOME_CHANNEL:-}"
+		if [ -z "$TG_HOME" ] && [ -n "${TELEGRAM_ALLOWED_USERS:-}" ]; then
+			TG_HOME="${TELEGRAM_ALLOWED_USERS%%,*}"
+		fi
+		TG_HOME="$(printf '%s' "$TG_HOME" | tr -d '[:space:]')"
+		if [ -n "$TG_HOME" ]; then
+			touch "$HERMES_ENV_FILE"
+			chmod 600 "$HERMES_ENV_FILE"
+			# Don't glue onto a no-trailing-newline last line (corrupts that entry).
+			[ -s "$HERMES_ENV_FILE" ] && [ -n "$(tail -c1 "$HERMES_ENV_FILE")" ] && printf '\n' >>"$HERMES_ENV_FILE"
+			printf 'TELEGRAM_HOME_CHANNEL=%s\n' "$TG_HOME" >>"$HERMES_ENV_FILE"
+			export TELEGRAM_HOME_CHANNEL="$TG_HOME"
+			echo "Telegram home channel seeded to $TG_HOME (run /sethome in another chat to change)."
+		fi
+	fi
+fi
+
+# Explicit polling mode wins over any inherited webhook URL (prior webhook deploy
+# or a restored .env), so the mode switch is deterministic — Hermes long-polls
+# whenever TELEGRAM_WEBHOOK_URL is empty.
+if [ "${TELEGRAM_MODE:-}" = "polling" ] && [ -n "${TELEGRAM_WEBHOOK_URL:-}" ]; then
+	log "TELEGRAM_MODE=polling — ignoring TELEGRAM_WEBHOOK_URL"
+	unset TELEGRAM_WEBHOOK_URL
 fi
 
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${SPACE_HOST:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
-  if [ "${TELEGRAM_MODE:-webhook}" != "polling" ]; then
-    export TELEGRAM_WEBHOOK_URL="https://${SPACE_HOST}/telegram"
-  fi
+	if [ "${TELEGRAM_MODE:-webhook}" != "polling" ]; then
+		export TELEGRAM_WEBHOOK_URL="https://${SPACE_HOST}/telegram"
+	fi
 fi
 
 if [ -n "${TELEGRAM_WEBHOOK_URL:-}" ] && [ -z "${TELEGRAM_WEBHOOK_SECRET:-}" ]; then
-  SECRET_FILE="$HERMES_HOME/.hermes-telegram-webhook-secret"
-  if [ -f "$SECRET_FILE" ]; then
-    TELEGRAM_WEBHOOK_SECRET="$(cat "$SECRET_FILE")"
-  else
-    TELEGRAM_WEBHOOK_SECRET="$(python3 - <<'PY'
+	SECRET_FILE="$HERMES_HOME/.hermes-telegram-webhook-secret"
+	if [ -f "$SECRET_FILE" ]; then
+		TELEGRAM_WEBHOOK_SECRET="$(cat "$SECRET_FILE")"
+	else
+		TELEGRAM_WEBHOOK_SECRET="$(
+			python3 - <<'PY'
 import secrets
 print(secrets.token_hex(32))
 PY
-)"
-    printf '%s' "$TELEGRAM_WEBHOOK_SECRET" > "$SECRET_FILE"
-    chmod 600 "$SECRET_FILE"
-  fi
-  export TELEGRAM_WEBHOOK_SECRET
+		)"
+		printf '%s' "$TELEGRAM_WEBHOOK_SECRET" >"$SECRET_FILE"
+		chmod 600 "$SECRET_FILE"
+	fi
+	export TELEGRAM_WEBHOOK_SECRET
 fi
 
 # ── Provider-prefix mapping (Hermes convention) ───────────────────
@@ -143,91 +219,91 @@ PROVIDER_FOR_CONFIG="${HERMES_INFERENCE_PROVIDER:-auto}"
 LLM_API_KEY="${LLM_API_KEY:-}"
 
 if [ -n "$MODEL_INPUT" ]; then
-  MODEL_PREFIX="${MODEL_INPUT%%/*}"
+	MODEL_PREFIX="${MODEL_INPUT%%/*}"
 else
-  MODEL_PREFIX=""
+	MODEL_PREFIX=""
 fi
 
 case "$MODEL_PREFIX" in
-  openrouter)
-    [ -n "$LLM_API_KEY" ] && export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$LLM_API_KEY}"
-    [ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="openrouter"
-    MODEL_FOR_CONFIG="${MODEL_INPUT#openrouter/}"
-    ;;
-  huggingface|hf)
-    [ -n "$LLM_API_KEY" ] && export HF_TOKEN="${HF_TOKEN:-$LLM_API_KEY}"
-    [ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="huggingface"
-    MODEL_FOR_CONFIG="${MODEL_INPUT#huggingface/}"
-    ;;
-  vercel-ai-gateway|ai-gateway)
-    [ -n "$LLM_API_KEY" ] && export AI_GATEWAY_API_KEY="${AI_GATEWAY_API_KEY:-$LLM_API_KEY}"
-    [ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="ai-gateway"
-    MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
-    ;;
-  anthropic)
-    [ -n "$LLM_API_KEY" ] && export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$LLM_API_KEY}"
-    ;;
-  openai|openai-codex)
-    [ -n "$LLM_API_KEY" ] && export OPENAI_API_KEY="${OPENAI_API_KEY:-$LLM_API_KEY}"
-    ;;
-  google|gemini)
-    [ -n "$LLM_API_KEY" ] && export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$LLM_API_KEY}" GEMINI_API_KEY="${GEMINI_API_KEY:-$LLM_API_KEY}"
-    PROVIDER_FOR_CONFIG="gemini"
-    MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
-    ;;
-  deepseek)
-    [ -n "$LLM_API_KEY" ] && export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-$LLM_API_KEY}"
-    ;;
-  kimi-coding|moonshot)
-    [ -n "$LLM_API_KEY" ] && export KIMI_API_KEY="${KIMI_API_KEY:-$LLM_API_KEY}"
-    ;;
-  kimi-coding-cn|moonshot-cn|kimi-cn)
-    [ -n "$LLM_API_KEY" ] && export KIMI_CN_API_KEY="${KIMI_CN_API_KEY:-$LLM_API_KEY}"
-    ;;
-  minimax)
-    [ -n "$LLM_API_KEY" ] && export MINIMAX_API_KEY="${MINIMAX_API_KEY:-$LLM_API_KEY}"
-    ;;
-  minimax-cn)
-    [ -n "$LLM_API_KEY" ] && export MINIMAX_CN_API_KEY="${MINIMAX_CN_API_KEY:-$LLM_API_KEY}"
-    ;;
-  xiaomi)
-    [ -n "$LLM_API_KEY" ] && export XIAOMI_API_KEY="${XIAOMI_API_KEY:-$LLM_API_KEY}"
-    ;;
-  zai|z-ai|z.ai|glm)
-    [ -n "$LLM_API_KEY" ] && export GLM_API_KEY="${GLM_API_KEY:-$LLM_API_KEY}"
-    ;;
-  arcee|arcee-ai|arceeai)
-    [ -n "$LLM_API_KEY" ] && export ARCEEAI_API_KEY="${ARCEEAI_API_KEY:-$LLM_API_KEY}"
-    ;;
-  gmi|gmi-cloud|gmicloud)
-    [ -n "$LLM_API_KEY" ] && export GMI_API_KEY="${GMI_API_KEY:-$LLM_API_KEY}"
-    ;;
-  alibaba|alibaba-coding-plan|alibaba_coding)
-    [ -n "$LLM_API_KEY" ] && export DASHSCOPE_API_KEY="${DASHSCOPE_API_KEY:-$LLM_API_KEY}"
-    ;;
-  tencent-tokenhub|tencent|tokenhub|tencentmaas)
-    [ -n "$LLM_API_KEY" ] && export TOKENHUB_API_KEY="${TOKENHUB_API_KEY:-$LLM_API_KEY}"
-    ;;
-  nvidia)
-    [ -n "$LLM_API_KEY" ] && export NVIDIA_API_KEY="${NVIDIA_API_KEY:-$LLM_API_KEY}"
-    ;;
-  xai|grok)
-    [ -n "$LLM_API_KEY" ] && export XAI_API_KEY="${XAI_API_KEY:-$LLM_API_KEY}"
-    ;;
-  kilocode)
-    [ -n "$LLM_API_KEY" ] && export KILOCODE_API_KEY="${KILOCODE_API_KEY:-$LLM_API_KEY}"
-    ;;
-  opencode-zen)
-    [ -n "$LLM_API_KEY" ] && export OPENCODE_ZEN_API_KEY="${OPENCODE_ZEN_API_KEY:-$LLM_API_KEY}"
-    ;;
-  opencode-go)
-    [ -n "$LLM_API_KEY" ] && export OPENCODE_GO_API_KEY="${OPENCODE_GO_API_KEY:-$LLM_API_KEY}"
-    ;;
+openrouter)
+	[ -n "$LLM_API_KEY" ] && export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$LLM_API_KEY}"
+	[ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="openrouter"
+	MODEL_FOR_CONFIG="${MODEL_INPUT#openrouter/}"
+	;;
+huggingface | hf)
+	[ -n "$LLM_API_KEY" ] && export HF_TOKEN="${HF_TOKEN:-$LLM_API_KEY}"
+	[ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="huggingface"
+	MODEL_FOR_CONFIG="${MODEL_INPUT#huggingface/}"
+	;;
+vercel-ai-gateway | ai-gateway)
+	[ -n "$LLM_API_KEY" ] && export AI_GATEWAY_API_KEY="${AI_GATEWAY_API_KEY:-$LLM_API_KEY}"
+	[ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="ai-gateway"
+	MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
+	;;
+anthropic)
+	[ -n "$LLM_API_KEY" ] && export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$LLM_API_KEY}"
+	;;
+openai | openai-codex)
+	[ -n "$LLM_API_KEY" ] && export OPENAI_API_KEY="${OPENAI_API_KEY:-$LLM_API_KEY}"
+	;;
+google | gemini)
+	[ -n "$LLM_API_KEY" ] && export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$LLM_API_KEY}" GEMINI_API_KEY="${GEMINI_API_KEY:-$LLM_API_KEY}"
+	PROVIDER_FOR_CONFIG="gemini"
+	MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
+	;;
+deepseek)
+	[ -n "$LLM_API_KEY" ] && export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-$LLM_API_KEY}"
+	;;
+kimi-coding | moonshot)
+	[ -n "$LLM_API_KEY" ] && export KIMI_API_KEY="${KIMI_API_KEY:-$LLM_API_KEY}"
+	;;
+kimi-coding-cn | moonshot-cn | kimi-cn)
+	[ -n "$LLM_API_KEY" ] && export KIMI_CN_API_KEY="${KIMI_CN_API_KEY:-$LLM_API_KEY}"
+	;;
+minimax)
+	[ -n "$LLM_API_KEY" ] && export MINIMAX_API_KEY="${MINIMAX_API_KEY:-$LLM_API_KEY}"
+	;;
+minimax-cn)
+	[ -n "$LLM_API_KEY" ] && export MINIMAX_CN_API_KEY="${MINIMAX_CN_API_KEY:-$LLM_API_KEY}"
+	;;
+xiaomi)
+	[ -n "$LLM_API_KEY" ] && export XIAOMI_API_KEY="${XIAOMI_API_KEY:-$LLM_API_KEY}"
+	;;
+zai | z-ai | z.ai | glm)
+	[ -n "$LLM_API_KEY" ] && export GLM_API_KEY="${GLM_API_KEY:-$LLM_API_KEY}"
+	;;
+arcee | arcee-ai | arceeai)
+	[ -n "$LLM_API_KEY" ] && export ARCEEAI_API_KEY="${ARCEEAI_API_KEY:-$LLM_API_KEY}"
+	;;
+gmi | gmi-cloud | gmicloud)
+	[ -n "$LLM_API_KEY" ] && export GMI_API_KEY="${GMI_API_KEY:-$LLM_API_KEY}"
+	;;
+alibaba | alibaba-coding-plan | alibaba_coding)
+	[ -n "$LLM_API_KEY" ] && export DASHSCOPE_API_KEY="${DASHSCOPE_API_KEY:-$LLM_API_KEY}"
+	;;
+tencent-tokenhub | tencent | tokenhub | tencentmaas)
+	[ -n "$LLM_API_KEY" ] && export TOKENHUB_API_KEY="${TOKENHUB_API_KEY:-$LLM_API_KEY}"
+	;;
+nvidia)
+	[ -n "$LLM_API_KEY" ] && export NVIDIA_API_KEY="${NVIDIA_API_KEY:-$LLM_API_KEY}"
+	;;
+xai | grok)
+	[ -n "$LLM_API_KEY" ] && export XAI_API_KEY="${XAI_API_KEY:-$LLM_API_KEY}"
+	;;
+kilocode)
+	[ -n "$LLM_API_KEY" ] && export KILOCODE_API_KEY="${KILOCODE_API_KEY:-$LLM_API_KEY}"
+	;;
+opencode-zen)
+	[ -n "$LLM_API_KEY" ] && export OPENCODE_ZEN_API_KEY="${OPENCODE_ZEN_API_KEY:-$LLM_API_KEY}"
+	;;
+opencode-go)
+	[ -n "$LLM_API_KEY" ] && export OPENCODE_GO_API_KEY="${OPENCODE_GO_API_KEY:-$LLM_API_KEY}"
+	;;
 esac
 
 if [ -n "${CUSTOM_BASE_URL:-}" ]; then
-  PROVIDER_FOR_CONFIG="${CUSTOM_PROVIDER:-custom}"
-  [ -n "$LLM_API_KEY" ] && export OPENAI_API_KEY="${OPENAI_API_KEY:-$LLM_API_KEY}"
+	PROVIDER_FOR_CONFIG="${CUSTOM_PROVIDER:-custom}"
+	[ -n "$LLM_API_KEY" ] && export OPENAI_API_KEY="${OPENAI_API_KEY:-$LLM_API_KEY}"
 fi
 
 export MODEL_FOR_CONFIG PROVIDER_FOR_CONFIG
@@ -239,178 +315,297 @@ export TELEGRAM_BASE_URL="${TELEGRAM_BASE_URL:-}"
 export TELEGRAM_BASE_FILE_URL="${TELEGRAM_BASE_FILE_URL:-}"
 
 if [ -n "${CLOUDFLARE_PROXY_URL:-}" ] && [ -z "$TELEGRAM_BASE_URL" ]; then
-  CLOUDFLARE_PROXY_URL="${CLOUDFLARE_PROXY_URL%/}"
-  export TELEGRAM_BASE_URL="${CLOUDFLARE_PROXY_URL}/bot"
-  export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
+	CLOUDFLARE_PROXY_URL="${CLOUDFLARE_PROXY_URL%/}"
+	export TELEGRAM_BASE_URL="${CLOUDFLARE_PROXY_URL}/bot"
+	export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
 fi
 
-# ── Build Hermes config.yaml ──────────────────────────────────────────
-python3 - <<'PY'
+# ── Hermes config setup (via CLI, not YAML) ───────────────────────────────
+log "Configuring Hermes via CLI"
+
+# MODEL_FOR_CONFIG and PROVIDER_FOR_CONFIG already extracted above (lines 181-275)
+
+# ── Gemini key pooling (support JSON array or single key) ───────────────────
+if [ -n "${GEMINI_API_KEYS:-}" ]; then
+	log "Parsing GEMINI_API_KEYS"
+	python3 - <<'PYKEYS'
+import json
+import sys
+import os
+import subprocess
+
+raw = os.environ.get("GEMINI_API_KEYS", "")
+keys = []
+
+try:
+    # Try JSON array first
+    keys = json.loads(raw)
+except Exception:
+    try:
+        # Try with control chars stripped
+        keys = json.loads(raw.replace('\x00', '').replace('\x1f', ''))
+    except Exception as e:
+        sys.stderr.write(f"ERROR parsing GEMINI_API_KEYS: {e}\n")
+        sys.exit(0)
+
+if not isinstance(keys, list):
+    sys.stderr.write("ERROR: GEMINI_API_KEYS must be a JSON list\n")
+    sys.exit(0)
+
+# Reset pool first
+subprocess.run(["hermes", "auth", "remove", "gemini", "1"], capture_output=True)
+
+added = 0
+for key in keys:
+    key = str(key).strip()
+    if key:
+        if subprocess.run(["hermes", "auth", "add", "gemini", "--type", "api-key", "--api-key", key],
+                         capture_output=True).returncode == 0:
+            added += 1
+
+if added > 0:
+    print(f"✓ Gemini pool seeded with {added} key(s)")
+    # Enable round-robin rotation
+    subprocess.run(["hermes", "config", "set", "credential_pool_strategies.gemini", "round_robin"],
+                  capture_output=True)
+PYKEYS
+elif [ -n "${GEMINI_API_KEY:-}" ]; then
+	log "Adding single Gemini API key"
+	hermes auth add gemini --type api-key --api-key "${GEMINI_API_KEY}" >/dev/null 2>&1 ||
+		warn "Failed to add Gemini API key"
+fi
+
+# HF provider setup: configure HF as default when HF_TOKEN is available
+if [ -n "${HF_TOKEN:-}" ]; then
+	hermes model set-provider hf --default || warn "HF provider config failed (continuing)"
+fi
+
+# ── Set model + provider via CLI (more reliable than YAML) ───────────────────
+hermes config set model "$MODEL_FOR_CONFIG" &&
+	log "✓ Model: $MODEL_FOR_CONFIG" ||
+	warn "Failed to set model (continuing)"
+
+hermes config set provider "$PROVIDER_FOR_CONFIG" &&
+	log "✓ Provider: $PROVIDER_FOR_CONFIG" ||
+	warn "Failed to set provider (continuing)"
+
+# ── Custom endpoint support ────────────────────────────────────────────────────
+if [ -n "${CUSTOM_BASE_URL:-}" ]; then
+	hermes config set model.base_url "${CUSTOM_BASE_URL}" &&
+		log "✓ Custom base_url: $CUSTOM_BASE_URL" ||
+		warn "Failed to set custom base_url"
+
+	[ -n "${CUSTOM_API_KEY:-}" ] &&
+		hermes config set model.api_key "${CUSTOM_API_KEY}" 2>/dev/null || true
+fi
+
+# ── Terminal/workspace ────────────────────────────────────────────────────────
+mkdir -p "$WORKSPACE_HOME"
+hermes config set terminal.cwd "$WORKSPACE_HOME" 2>/dev/null || true
+hermes config set compression.enabled true 2>/dev/null || true
+
+# ── Telegram platform config (augments CLI-written config.yaml) ───────────────
+# `hermes config set` covers scalars; the telegram platform needs nested keys and
+# an allow_from list, so inject them straight into config.yaml after the CLI runs.
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+	log "Configuring Telegram platform"
+	python3 - <<'PY'
 import os
 from pathlib import Path
+
 import yaml
 
-home = Path(os.environ["HERMES_HOME"])
-path = home / "config.yaml"
+path = Path(os.environ["HERMES_HOME"]) / "config.yaml"
 try:
     config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 except FileNotFoundError:
     config = {}
 
-model_name = os.environ.get("MODEL_FOR_CONFIG", "").strip()
-provider_name = os.environ.get("PROVIDER_FOR_CONFIG", "").strip()
-
-if model_name:
-    model = config.setdefault("model", {})
-    model["default"] = model_name
-    if provider_name and provider_name != "auto":
-        model["provider"] = provider_name
-    else:
-        model.pop("provider", None)
-else:
-    model = config.get("model", {})
-    print("No LLM_MODEL/HERMES_MODEL set; leaving Hermes model config unchanged.")
-
-custom_base = os.environ.get("CUSTOM_BASE_URL", "").strip()
-if custom_base and model_name:
-    model.setdefault("base_url", custom_base.rstrip("/"))
-    if os.environ.get("CUSTOM_API_KEY"):
-        model.setdefault("api_key", os.environ["CUSTOM_API_KEY"])
-    try:
-        model.setdefault("context_length", int(os.environ.get("CUSTOM_MODEL_CONTEXT_LENGTH", "131072")))
-        model.setdefault("max_tokens", int(os.environ.get("CUSTOM_MODEL_MAX_TOKENS", "8192")))
-    except ValueError:
-        pass
-
-config.setdefault("terminal", {}).setdefault("cwd", os.environ.get("MESSAGING_CWD", str(home / "workspace")))
-config.setdefault("compression", {}).setdefault("enabled", True)
-config.setdefault("display", {}).setdefault("background_process_notifications", os.environ.get("HERMES_BACKGROUND_NOTIFICATIONS", "result"))
-config.setdefault("security", {}).setdefault("redact_secrets", True)
-
-platforms = config.setdefault("platforms", {})
-
-if os.environ.get("TELEGRAM_BOT_TOKEN"):
-    telegram = platforms.setdefault("telegram", {})
-    telegram.setdefault("enabled", True)
-    extra = telegram.setdefault("extra", {})
-    if os.environ.get("TELEGRAM_BASE_URL"):
-        extra.setdefault("base_url", os.environ["TELEGRAM_BASE_URL"])
-        extra.setdefault("base_file_url", os.environ.get("TELEGRAM_BASE_FILE_URL") or os.environ["TELEGRAM_BASE_URL"])
-    if os.environ.get("TELEGRAM_ALLOWED_USERS"):
-        config.setdefault("telegram", {}).setdefault("allow_from", [
-            item.strip()
-            for item in os.environ["TELEGRAM_ALLOWED_USERS"].split(",")
-            if item.strip()
-        ])
+telegram = config.setdefault("platforms", {}).setdefault("telegram", {})
+telegram.setdefault("enabled", True)
+extra = telegram.setdefault("extra", {})
+if os.environ.get("TELEGRAM_BASE_URL"):
+    extra.setdefault("base_url", os.environ["TELEGRAM_BASE_URL"])
+    extra.setdefault("base_file_url", os.environ.get("TELEGRAM_BASE_FILE_URL") or os.environ["TELEGRAM_BASE_URL"])
+if os.environ.get("TELEGRAM_ALLOWED_USERS"):
+    config.setdefault("telegram", {}).setdefault("allow_from", [
+        item.strip()
+        for item in os.environ["TELEGRAM_ALLOWED_USERS"].split(",")
+        if item.strip()
+    ])
 
 path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 path.chmod(0o600)
 PY
+fi
 
-# ── Startup summary ───────────────────────────────────────────────────
-echo ""
-echo "Primary UI : ${PRIMARY_UI:-webui}"
-echo "Model      : ${MODEL_FOR_CONFIG:-unset}"
-echo "Provider   : ${PROVIDER_FOR_CONFIG:-unset}"
+# Re-enable Telegram reactions on every boot (persisted config may omit it)
+hermes config set telegram.reactions true &&
+	log "✓ Telegram reactions enabled" ||
+	warn "Failed to set telegram.reactions (continuing)"
+
+# On cloud, sed-patch Telegram proxy into Hermes source to catch IP-fallback path
+if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
+	if [ -n "${TELEGRAM_BASE_URL:-}" ]; then
+		PROXY_HOST="${TELEGRAM_BASE_URL#*://}"
+		PROXY_HOST="${PROXY_HOST%%/*}"
+		if [ -n "$PROXY_HOST" ] && [ "$PROXY_HOST" != "api.telegram.org" ]; then
+			SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/local/lib/python3.14/site-packages")
+			find "$SITE_PACKAGES" -path "*/hermes*" -type f \( -name "*.py" -o -name "*.json" \) \
+				-exec sed -i "s/api.telegram.org/$PROXY_HOST/g" {} + 2>/dev/null || true
+			log "✓ Telegram proxy (sed-patch) -> $PROXY_HOST"
+		fi
+	fi
+fi
+
+# ── Polling mode: clear any stale webhook so getUpdates can take over ──────────
+# Hermes long-polls (getUpdates) whenever TELEGRAM_WEBHOOK_URL is empty. But if a
+# webhook was ever registered, Telegram answers getUpdates with 409 Conflict until
+# it is removed — so a webhook→polling switch silently fails without this call. It
+# is idempotent (Telegram returns ok when no webhook exists), so it self-heals on
+# every polling boot. Pending updates are kept (drop_pending_updates defaults to
+# false) so no messages are lost across the switch. Routed through TELEGRAM_BASE_URL
+# when set, because on HF/Render outbound api.telegram.org is blocked.
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
+	if [ -z "${TELEGRAM_BASE_URL:-}" ] && { [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; }; then
+		warn "Polling on $PLATFORM without a Telegram proxy (set CLOUDFLARE_PROXY_URL or TELEGRAM_BASE_URL) — outbound api.telegram.org is blocked; getUpdates will hang"
+	else
+		TELEGRAM_API_BASE="${TELEGRAM_BASE_URL:-https://api.telegram.org/bot}" \
+			python3 - <<'PY' && log "Telegram webhook cleared (polling mode)" || warn "deleteWebhook failed (continuing; polling may 409 if a webhook is still registered)"
+import json
+import os
+import urllib.request
+
+base = os.environ["TELEGRAM_API_BASE"]
+token = os.environ["TELEGRAM_BOT_TOKEN"]
+with urllib.request.urlopen(f"{base}{token}/deleteWebhook", timeout=15) as resp:
+    data = json.loads(resp.read())
+# Telegram answers HTTP 200 with {"ok": false, ...} for API-level failures, so a
+# non-2xx exception alone is not enough — assert ok so a soft failure reaches warn.
+assert data.get("ok"), data.get("description", "unknown error")
+PY
+	fi
+fi
+
+# ── SSH Debug Access (tmate) ──────────────────────────────────────────────────
+if command -v tmate >/dev/null 2>&1; then
+	echo "set -g mouse on" >"$HOME/.tmate.conf"
+	tmate -S /tmp/tmate.sock new-session -d 2>/dev/null || true
+	for attempt in 1 2 3 4 5; do
+		SSH_URL=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' 2>/dev/null || true)
+		[ -n "${SSH_URL:-}" ] && break
+		sleep 1
+	done
+	[ -n "${SSH_URL:-}" ] && log "SSH access: $SSH_URL" || log "tmate unavailable for SSH debugging"
+fi
+
+# ── Startup summary ────────────────────────────────────────────────────────────
+log ""
+log "╔════════════════════════════════════════════════════════════════╗"
+log "║  Summary                                                       ║"
+log "╚════════════════════════════════════════════════════════════════╝"
+log "Primary UI : ${PRIMARY_UI:-webui}"
+log "Model      : ${MODEL_FOR_CONFIG:-unset}"
+log "Provider   : ${PROVIDER_FOR_CONFIG:-unset}"
+log "Agent      : $AGENT_NAME"
+log ""
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-  echo "Telegram   : enabled"
+	log "Telegram   : enabled"
 else
-  echo "Telegram   : not configured"
+	log "Telegram   : not configured"
 fi
-if [ -n "${HF_TOKEN:-}" ]; then
-  echo "Backup     : ${BACKUP_DATASET} (poll ${SYNC_POLL_INTERVAL:-2}s, debounce ${SYNC_DEBOUNCE_SECONDS:-3}s, max ${SYNC_INTERVAL:-60}s)"
-else
-  echo "Backup     : disabled"
-fi
-if [ -n "${CLOUDFLARE_PROXY_URL:-}" ]; then
-  echo "CF Proxy   : ${CLOUDFLARE_PROXY_URL}"
-fi
-echo "Router     : 0.0.0.0:${PUBLIC_PORT}"
-echo "WebUI      : 127.0.0.1:${WEBUI_PORT}"
-echo "Gateway    : 127.0.0.1:${GATEWAY_API_PORT}"
-echo "Dashboard  : 127.0.0.1:${DASHBOARD_PORT}"
-echo ""
+[ -n "${HF_TOKEN:-}" ] &&
+	log "Backup     : enabled (${BACKUP_DATASET:-hermes-backup})" ||
+	log "Backup     : disabled"
+[ -n "${CLOUDFLARE_PROXY_URL:-}" ] &&
+	log "CF Proxy   : ${CLOUDFLARE_PROXY_URL}"
+log ""
+log "Router     : 0.0.0.0:${PUBLIC_PORT}"
+log "WebUI      : 127.0.0.1:${WEBUI_PORT}"
+log "Gateway    : 127.0.0.1:${GATEWAY_API_PORT}"
+log "Dashboard  : 127.0.0.1:${DASHBOARD_PORT}"
+log ""
 
 # ── Process launchers ─────────────────────────────────────────────────
 # Supervisor loop restarts dead services via these launchers.
 start_health() {
-  node "$APP_DIR/health-server.js" &
-  HEALTH_PID=$!
+	node "$APP_DIR/health-server.js" &
+	HEALTH_PID=$!
 }
 
 start_dashboard() {
-  echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}..."
-  (hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
-  DASHBOARD_PID=$!
+	echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}"
+	(hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
+	DASHBOARD_PID=$!
 }
 
 start_gateway() {
-  echo "Launching Hermes gateway..."
-  (hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
-  GATEWAY_PID=$!
+	echo "Launching Hermes gateway"
+	(hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
+	GATEWAY_PID=$!
 }
 
 start_webui() {
-  echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}..."
-  (cd "$WEBUI_REPO" && \
-     "$HERMES_WEBUI_PYTHON" "$WEBUI_REPO/server.py" 2>&1 | \
-     tee -a "$HERMES_HOME/logs/webui.log") &
-  WEBUI_PID=$!
+	echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}"
+	(cd "$WEBUI_REPO" &&
+		"$HERMES_WEBUI_PYTHON" "$WEBUI_REPO/server.py" 2>&1 |
+		tee -a "$HERMES_HOME/logs/webui.log") &
+	WEBUI_PID=$!
 }
 
 # Kept alive by supervisor; silent death = silent data loss.
 SYNC_LOOP_PID=""
 start_sync_loop() {
-  [ -n "${HF_TOKEN:-}" ] || return 0
-  if [ -n "${SYNC_LOOP_PID:-}" ] && kill -0 "$SYNC_LOOP_PID" 2>/dev/null; then
-    return 0
-  fi
-  python3 -u "$APP_DIR/hermes-sync.py" loop &
-  SYNC_LOOP_PID=$!
+	[ -n "${HF_TOKEN:-}" ] || return 0
+	if [ -n "${SYNC_LOOP_PID:-}" ] && kill -0 "$SYNC_LOOP_PID" 2>/dev/null; then
+		return 0
+	fi
+	python3 -u "$APP_DIR/hermes-sync.py" loop &
+	SYNC_LOOP_PID=$!
 }
 
 # No-op without HF_TOKEN.
 sync_now() {
-  [ -n "${HF_TOKEN:-}" ] || return 0
-  python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: state sync failed."
+	[ -n "${HF_TOKEN:-}" ] || return 0
+	python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: state sync failed."
 }
 
 # Returns 0 on connect or if pid dies/timeout.
 wait_port_ready() {
-  local port="$1" timeout="$2" pid="$3" i
-  for ((i=0; i<timeout; i++)); do
-    if (echo > "/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
-      return 0
-    fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-      return 1
-    fi
-    sleep 1
-  done
-  return 1
+	local port="$1" timeout="$2" pid="$3" i
+	for ((i = 0; i < timeout; i++)); do
+		if (echo >"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+			return 0
+		fi
+		if ! kill -0 "$pid" 2>/dev/null; then
+			return 1
+		fi
+		sleep 1
+	done
+	return 1
 }
 
 kill_tree() {
-  local pid="$1" child
-  [ -n "$pid" ] || return 0
-  if [ -r "/proc/$pid/task/$pid/children" ]; then
-    for child in $(cat "/proc/$pid/task/$pid/children" 2>/dev/null); do
-      kill_tree "$child"
-    done
-  fi
-  kill -TERM "$pid" 2>/dev/null || true
+	local pid="$1" child
+	[ -n "$pid" ] || return 0
+	if [ -r "/proc/$pid/task/$pid/children" ]; then
+		for child in $(cat "/proc/$pid/task/$pid/children" 2>/dev/null); do
+			kill_tree "$child"
+		done
+	fi
+	kill -TERM "$pid" 2>/dev/null || true
 }
 
 # ── Graceful shutdown ─────────────────────────────────────────────────
 graceful_shutdown() {
-  trap '' SIGTERM SIGINT   # ignore repeat signals so the final sync isn't interrupted
-  echo "Shutting down..."
-  sync_now
-  for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}"; do
-    kill_tree "$pid"
-  done
-  kill $(jobs -p) 2>/dev/null || true
-  exit 0
+	trap '' SIGTERM SIGINT # ignore repeat signals so the final sync isn't interrupted
+	echo "Shutting down"
+	sync_now
+	for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}"; do
+		kill_tree "$pid"
+	done
+	kill $(jobs -p) 2>/dev/null || true
+	exit 0
 }
 trap graceful_shutdown SIGTERM SIGINT
 
@@ -432,7 +627,7 @@ WEBUI_READY_TIMEOUT="${WEBUI_READY_TIMEOUT:-60}"
 start_health
 
 if [ -n "${WEBHOOK_URL:-}" ]; then
-  python3 - <<'PY' >/dev/null 2>&1 &
+	python3 - <<'PY' >/dev/null 2>&1 &
 import json, os, urllib.request
 body = json.dumps({
     "event": "restart",
@@ -452,12 +647,18 @@ start_dashboard
 # Fatal on first boot; no gateway = useless container.
 start_gateway
 if ! wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
-  echo ""
-  echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
-  echo "----------------------------------------"
-  tail -40 "$HERMES_HOME/logs/gateway.log" || true
-  exit 1
+	echo ""
+	echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
+	echo "----------------------------------------"
+	tail -40 "$HERMES_HOME/logs/gateway.log" || true
+	exit 1
 fi
+
+# Verify model was set (hermes config commands succeeded)
+if [ -z "$MODEL_FOR_CONFIG" ]; then
+	die "CRITICAL: No model configured. Ensure LLM_MODEL is set."
+fi
+log "✓ Model configured: $MODEL_FOR_CONFIG"
 
 # Start persistence before state mutations.
 start_sync_loop
@@ -465,87 +666,61 @@ start_sync_loop
 # Non-fatal; router shows it as down.
 start_webui
 if wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
-  echo "Hermes WebUI is up."
+	echo "Hermes WebUI is up."
 else
-  echo "Warning: Hermes WebUI not ready within ${WEBUI_READY_TIMEOUT}s. Last 20 log lines:"
-  tail -20 "$HERMES_HOME/logs/webui.log" || true
+	echo "Warning: Hermes WebUI not ready within ${WEBUI_READY_TIMEOUT}s. Last 20 log lines:"
+	tail -20 "$HERMES_HOME/logs/webui.log" || true
 fi
 
-# ── Supervisor loop ───────────────────────────────────────────────────
-# Polls PIDs; restarts dead services; caps restarts.
-SUPERVISOR_POLL_INTERVAL="${SUPERVISOR_POLL_INTERVAL:-5}"
-SUPERVISOR_MAX_RESTARTS="${SUPERVISOR_MAX_RESTARTS:-0}"
-HEALTH_RESTARTS=0
-DASHBOARD_RESTARTS=0
-GATEWAY_RESTARTS=0
-WEBUI_RESTARTS=0
-SYNC_RESTARTS=0
+# ── Service restart loop (self-healing) ───────────────────────────────────────
+# Restart services if they die. On cloud, exit and let orchestrator restart container.
+SUPERVISOR_POLL_INTERVAL="${SUPERVISOR_POLL_INTERVAL:-10}"
 
-cap_reached() {  # restart_count
-  [ "$SUPERVISOR_MAX_RESTARTS" != "0" ] && [ "$1" -ge "$SUPERVISOR_MAX_RESTARTS" ]
-}
+log "Starting service monitor loop (restart on crash)"
 
 while true; do
-  sleep "$SUPERVISOR_POLL_INTERVAL"
+	sleep "$SUPERVISOR_POLL_INTERVAL"
 
-  if ! kill -0 "$HEALTH_PID" 2>/dev/null; then
-    HEALTH_RESTARTS=$((HEALTH_RESTARTS + 1))
-    if cap_reached "$HEALTH_RESTARTS"; then
-      echo "health-server hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
-      exit 1
-    fi
-    echo "Warning: health-server died; restart #${HEALTH_RESTARTS}..."
-    start_health
-    sync_now
-  fi
+	# Check gateway
+	if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+		warn "Hermes gateway died (PID $GATEWAY_PID). Respawning in 5s"
+		sleep 5
+		start_gateway
+		if wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
+			log "Gateway restarted successfully"
+		else
+			warn "Gateway failed to restart — continuing anyway"
+		fi
+		sync_now
+	fi
 
-  if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
-    DASHBOARD_RESTARTS=$((DASHBOARD_RESTARTS + 1))
-    if cap_reached "$DASHBOARD_RESTARTS"; then
-      echo "dashboard hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
-      exit 1
-    fi
-    echo "Warning: Hermes dashboard died; restart #${DASHBOARD_RESTARTS}..."
-    start_dashboard
-    sync_now
-  fi
+	# Check WebUI
+	if ! kill -0 "$WEBUI_PID" 2>/dev/null; then
+		warn "Hermes WebUI died (PID $WEBUI_PID). Respawning in 5s"
+		sleep 5
+		start_webui
+		if wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
+			log "WebUI restarted successfully"
+		fi
+		sync_now
+	fi
 
-  if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
-    GATEWAY_RESTARTS=$((GATEWAY_RESTARTS + 1))
-    if cap_reached "$GATEWAY_RESTARTS"; then
-      echo "gateway hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
-      exit 1
-    fi
-    echo "Warning: Hermes gateway died; restart #${GATEWAY_RESTARTS}..."
-    start_gateway
-    if ! wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
-      echo "Warning: gateway not ready within ${GATEWAY_READY_TIMEOUT}s after restart."
-    fi
-    sync_now
-  fi
+	# Check health server
+	if ! kill -0 "$HEALTH_PID" 2>/dev/null; then
+		warn "Health server died. Respawning"
+		start_health
+	fi
 
-  if ! kill -0 "$WEBUI_PID" 2>/dev/null; then
-    WEBUI_RESTARTS=$((WEBUI_RESTARTS + 1))
-    if cap_reached "$WEBUI_RESTARTS"; then
-      echo "webui hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
-      exit 1
-    fi
-    echo "Warning: Hermes WebUI died; restart #${WEBUI_RESTARTS}..."
-    start_webui
-    if ! wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
-      echo "Warning: webui not ready within ${WEBUI_READY_TIMEOUT}s after restart."
-    fi
-    sync_now
-  fi
+	# Check dashboard (non-fatal)
+	if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
+		warn "Dashboard died. Respawning"
+		start_dashboard
+	fi
 
-  if [ -n "${HF_TOKEN:-}" ] && { [ -z "${SYNC_LOOP_PID:-}" ] || ! kill -0 "$SYNC_LOOP_PID" 2>/dev/null; }; then
-    SYNC_RESTARTS=$((SYNC_RESTARTS + 1))
-    if cap_reached "$SYNC_RESTARTS"; then
-      echo "backup sync loop hit restart cap (${SUPERVISOR_MAX_RESTARTS}); exiting for container restart."
-      exit 1
-    fi
-    echo "Warning: backup sync loop died; restart #${SYNC_RESTARTS}..."
-    SYNC_LOOP_PID=""
-    start_sync_loop
-  fi
+	# Check sync loop (if enabled)
+	if [ -n "${HF_TOKEN:-}" ] && { [ -z "${SYNC_LOOP_PID:-}" ] || ! kill -0 "$SYNC_LOOP_PID" 2>/dev/null; }; then
+		warn "Backup sync loop died. Respawning"
+		SYNC_LOOP_PID=""
+		start_sync_loop
+	fi
 done

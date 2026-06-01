@@ -16,9 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     python3 \
     nodejs \
-    npm \
-    chromium \
-    libnss3 \
+     npm \
+     chromium \
+     tmate \
+     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
     libdrm2 \
@@ -38,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
         huggingface_hub hf_transfer pyyaml
 
-# Clone WebUI; install deps into agent venv so imports resolve.
+# Clone WebUI; install deps using system pip (base image venv may not exist yet)
 RUN git clone --depth 1 --branch ${WEBUI_REF} \
         https://github.com/nesquena/hermes-webui.git /opt/hermes-webui \
  && ( [ -f /opt/hermes-webui/requirements.txt ] \
