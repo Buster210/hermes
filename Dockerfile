@@ -31,10 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libx11-6 \
     libxext6 \
     libxfixes3 \
-    libasound2 \
     fonts-dejavu-core \
     fonts-liberation \
     fonts-noto-color-emoji \
+    && (apt-get install -y --no-install-recommends libasound2 2>/dev/null || apt-get install -y --no-install-recommends libasound2t64 2>/dev/null || true) \
     && rm -rf /var/lib/apt/lists/* \
     && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
         huggingface_hub hf_transfer pyyaml
@@ -53,6 +53,8 @@ COPY --chown=hermes:hermes health-server.js               /opt/hermes/health-ser
 COPY --chown=hermes:hermes hermes-sync.py                 /opt/hermes/hermes-sync.py
 COPY --chown=hermes:hermes cloudflare-proxy-setup.py      /opt/hermes/cloudflare-proxy-setup.py
 COPY --chown=hermes:hermes cloudflare-keepalive-setup.py  /opt/hermes/cloudflare-keepalive-setup.py
+COPY --chown=hermes:hermes env-builder.html               /opt/hermes/env-builder.html
+COPY --chown=hermes:hermes env-builder.js                 /opt/hermes/env-builder.js
 
 RUN chmod +x \
     /opt/hermes/start.sh \

@@ -403,6 +403,8 @@ fi
 mkdir -p "$WORKSPACE_HOME"
 hermes config set terminal.cwd "$WORKSPACE_HOME" 2>/dev/null || true
 hermes config set compression.enabled true 2>/dev/null || true
+# Redact secrets from agent output/logs by default — safe default for a hosted agent.
+hermes config set security.redact_secrets true 2>/dev/null || true
 
 # ── Telegram platform config (augments CLI-written config.yaml) ───────────────
 # `hermes config set` covers scalars; the telegram platform needs nested keys and
@@ -641,6 +643,94 @@ urllib.request.urlopen(req, timeout=10).read()
 PY
 fi
 
+# ── Optional boot-time package installs (HF Variables/Secrets) ────────────────
+# Declarative installs so terminal/declared deps survive container restarts
+# without a custom Dockerfile. Best-effort: each failure is logged and counted,
+# never fatal. apt needs root/sudo (absent under USER hermes) so it degrades to
+# a logged skip; pip into the agent venv and HERMES_RUN work as hermes.
+HM_STARTUP_FAILURES=0
+
+if [ -n "${HERMES_APT_PACKAGES:-}" ]; then
+	echo "Installing apt packages from HERMES_APT_PACKAGES..."
+	read -r -a HM_APT_PACKAGES <<<"$HERMES_APT_PACKAGES"
+	if command -v sudo >/dev/null 2>&1; then
+		if sudo apt-get update && sudo apt-get install -y "${HM_APT_PACKAGES[@]}"; then
+			echo "HERMES_APT_PACKAGES install complete."
+		else
+			HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+			echo "ERROR: HERMES_APT_PACKAGES install failed: ${HERMES_APT_PACKAGES}" >&2
+		fi
+	elif [ "$(id -u)" -eq 0 ]; then
+		if apt-get update && apt-get install -y "${HM_APT_PACKAGES[@]}"; then
+			echo "HERMES_APT_PACKAGES install complete."
+		else
+			HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+			echo "ERROR: HERMES_APT_PACKAGES install failed: ${HERMES_APT_PACKAGES}" >&2
+		fi
+	else
+		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+		echo "ERROR: root/sudo unavailable; HERMES_APT_PACKAGES skipped" >&2
+	fi
+fi
+
+if [ -n "${HERMES_PIP_PACKAGES:-}" ]; then
+	echo "Installing Python packages from HERMES_PIP_PACKAGES..."
+	read -r -a HM_PIP_PACKAGES <<<"$HERMES_PIP_PACKAGES"
+	if /opt/hermes/.venv/bin/pip install "${HM_PIP_PACKAGES[@]}"; then
+		echo "HERMES_PIP_PACKAGES install complete."
+	else
+		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+		echo "ERROR: HERMES_PIP_PACKAGES install failed: ${HERMES_PIP_PACKAGES}" >&2
+	fi
+fi
+
+if [ -n "${HERMES_NPM_PACKAGES:-}" ]; then
+	echo "Installing npm packages from HERMES_NPM_PACKAGES..."
+	read -r -a HM_NPM_PACKAGES <<<"$HERMES_NPM_PACKAGES"
+	if npm install -g "${HM_NPM_PACKAGES[@]}"; then
+		echo "HERMES_NPM_PACKAGES install complete."
+	else
+		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+		echo "ERROR: HERMES_NPM_PACKAGES install failed: ${HERMES_NPM_PACKAGES}" >&2
+	fi
+fi
+
+# Arbitrary startup script (HERMES_RUN): plain bash, or base64:/b64: prefixed.
+#   HERMES_RUN="pip install pandas && echo ready"
+#   HERMES_RUN="base64:$(base64 -w0 setup.sh)"
+hm_run_startup() {
+	local payload="$1"
+	[ -n "$payload" ] || return 0
+	local script_file
+	script_file=$(mktemp "/tmp/hermes-startup.XXXXXX.sh")
+	if [[ "$payload" == base64:* ]] || [[ "$payload" == b64:* ]]; then
+		printf '%s' "${payload#*:}" | base64 -d >"$script_file"
+	else
+		printf '%s\n' "$payload" >"$script_file"
+	fi
+	chmod 700 "$script_file"
+	echo "[startup:HERMES_RUN] running script"
+	set +e
+	bash "$script_file"
+	local rc=$?
+	set -e
+	rm -f "$script_file"
+	if [ "$rc" -eq 0 ]; then
+		echo "[startup:HERMES_RUN] ok"
+	else
+		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+		echo "ERROR: HERMES_RUN script failed (exit ${rc})" >&2
+	fi
+}
+
+if [ -n "${HERMES_RUN:-}" ]; then
+	hm_run_startup "$HERMES_RUN"
+fi
+
+if [ "$HM_STARTUP_FAILURES" -gt 0 ]; then
+	echo "Warning: ${HM_STARTUP_FAILURES} startup step(s) failed. Check logs above." >&2
+fi
+
 # Private; no readiness gate.
 start_dashboard
 
@@ -675,6 +765,8 @@ fi
 # ── Service restart loop (self-healing) ───────────────────────────────────────
 # Restart services if they die. On cloud, exit and let orchestrator restart container.
 SUPERVISOR_POLL_INTERVAL="${SUPERVISOR_POLL_INTERVAL:-10}"
+SUPERVISOR_MAX_RESTARTS="${SUPERVISOR_MAX_RESTARTS:-0}" # 0 = unlimited
+GATEWAY_RESTART_COUNT=0
 
 log "Starting service monitor loop (restart on crash)"
 
@@ -683,7 +775,15 @@ while true; do
 
 	# Check gateway
 	if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
-		warn "Hermes gateway died (PID $GATEWAY_PID). Respawning in 5s"
+		# Bail past the cap so the platform recreates a fresh container instead of
+		# us respawning a crash-looping gateway forever. 0 (default) = unlimited.
+		if [ "$SUPERVISOR_MAX_RESTARTS" != "0" ] && [ "$GATEWAY_RESTART_COUNT" -ge "$SUPERVISOR_MAX_RESTARTS" ]; then
+			warn "Hermes gateway exceeded SUPERVISOR_MAX_RESTARTS ($SUPERVISOR_MAX_RESTARTS) — syncing and exiting for a clean restart"
+			sync_now
+			exit 1
+		fi
+		GATEWAY_RESTART_COUNT=$((GATEWAY_RESTART_COUNT + 1))
+		warn "Hermes gateway died (PID $GATEWAY_PID). Respawning in 5s (restart $GATEWAY_RESTART_COUNT)"
 		sleep 5
 		start_gateway
 		if wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then

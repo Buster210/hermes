@@ -693,7 +693,11 @@ const server = http.createServer(async (req, res) => {
 
   if (path === "/health") {
     const data = await statusPayload();
-    res.writeHead(data.ok ? 200 : 503, { "content-type": "application/json" });
+    // Always 200 so the HF Space platform probe keeps the container alive while
+    // the gateway warms up or the supervisor respawns it; truthful health is in
+    // the body (ok/gateway/webui) and at /status. A 503 here makes HF kill a
+    // container the supervisor would have recovered on its own.
+    res.writeHead(200, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
         ok: data.ok,
@@ -709,6 +713,41 @@ const server = http.createServer(async (req, res) => {
     const data = await statusPayload();
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(data, null, 2));
+    return;
+  }
+
+  // ENV Builder — token-gated helper that generates a .env from a guided form.
+  if (path === "/env-builder" || path === "/env-builder/") {
+    if (!requireAuth(req, res)) return;
+    try {
+      const html = fs.readFileSync(
+        require("path").join(__dirname, "env-builder.html"),
+        "utf8",
+      );
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(html);
+    } catch {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      res.end("env-builder.html not found");
+    }
+    return;
+  }
+
+  if (path === "/env-builder.js") {
+    if (!requireAuth(req, res)) return;
+    try {
+      const js = fs.readFileSync(
+        require("path").join(__dirname, "env-builder.js"),
+        "utf8",
+      );
+      res.writeHead(200, {
+        "content-type": "application/javascript; charset=utf-8",
+      });
+      res.end(js);
+    } catch {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      res.end("env-builder.js not found");
+    }
     return;
   }
 
@@ -857,6 +896,12 @@ const server = http.createServer(async (req, res) => {
   proxyRequest(req, res, WEBUI_PORT);
 });
 
+// HF's load balancer holds long-lived streaming responses open; disable Node's
+// default socket timeout so long SSE/agent streams aren't dropped, and keep
+// keepAliveTimeout above the LB's ~60s idle window.
+server.timeout = 0;
+server.keepAliveTimeout = 65000;
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Hermes WebUI router listening on 0.0.0.0:${PORT}`);
 });
@@ -902,8 +947,13 @@ server.on("upgrade", (req, clientSocket, head) => {
     
     const headerLines = [
       `${req.method} ${targetPath} HTTP/1.1`,
+      `X-Forwarded-Host: ${req.headers.host || ""}`,
+      `X-Forwarded-Proto: ${req.headers["x-forwarded-proto"] || "https"}`,
     ];
     for (const [name, value] of Object.entries(req.headers)) {
+      // Skip inbound forwarded headers — re-injected above to avoid duplicates.
+      const lower = name.toLowerCase();
+      if (lower === "x-forwarded-host" || lower === "x-forwarded-proto") continue;
       if (Array.isArray(value)) {
         for (const v of value) headerLines.push(`${name}: ${v}`);
       } else {
