@@ -585,8 +585,13 @@ telegram = config.setdefault("platforms", {}).setdefault("telegram", {})
 telegram.setdefault("enabled", True)
 extra = telegram.setdefault("extra", {})
 if os.environ.get("TELEGRAM_BASE_URL"):
-    extra.setdefault("base_url", os.environ["TELEGRAM_BASE_URL"])
-    extra.setdefault("base_file_url", os.environ.get("TELEGRAM_BASE_FILE_URL") or os.environ["TELEGRAM_BASE_URL"])
+    # Overwrite, never setdefault: the proxy worker URL is derived fresh each boot
+    # (per SPACE_HOST), but config.yaml is persisted across boots. setdefault would
+    # pin whatever URL was first written — so a stale/renamed/broken worker URL
+    # survives forever and the gateway keeps dialing a dead proxy (placeholder 404
+    # → InvalidToken). Re-sync to the current proxy every boot.
+    extra["base_url"] = os.environ["TELEGRAM_BASE_URL"]
+    extra["base_file_url"] = os.environ.get("TELEGRAM_BASE_FILE_URL") or os.environ["TELEGRAM_BASE_URL"]
 if os.environ.get("TELEGRAM_ALLOWED_USERS"):
     config.setdefault("telegram", {}).setdefault("allow_from", [
         item.strip()
@@ -616,6 +621,34 @@ if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
 			log "✓ Telegram proxy (sed-patch) -> $PROXY_HOST"
 		fi
 	fi
+
+	# Cloudflare workers.dev routes propagate non-monotonically: the readiness
+	# probe can confirm the worker live, yet the gateway's first getMe still
+	# hits the "nothing here yet" placeholder on a lagging edge. python-telegram-bot
+	# parses that HTML and raises InvalidToken — an error class the gateway's
+	# connect-retry loop does NOT catch (it only retries NetworkError/TimedOut/
+	# OSError), so Telegram dies permanently on a transient. Widen that retry to
+	# also cover InvalidToken so it rides out the residual propagation flap.
+	# Patches the editable source the gateway actually imports (/opt/hermes/...),
+	# which the site-packages find above never reaches. Idempotent: re-running
+	# finds the already-widened line and no-ops.
+	TG_FILE=$(python3 -c "import gateway.platforms.telegram as t; print(t.__file__)" 2>/dev/null || true)
+	if [ -n "$TG_FILE" ] && [ -f "$TG_FILE" ]; then
+		sed -i \
+			-e 's/from telegram.error import NetworkError, TimedOut$/from telegram.error import NetworkError, TimedOut, InvalidToken/' \
+			-e 's/except (NetworkError, TimedOut, OSError) as init_err:/except (NetworkError, TimedOut, OSError, InvalidToken) as init_err:/' \
+			"$TG_FILE" 2>/dev/null &&
+			log "✓ Telegram connect-retry hardened (sed-patch: retry InvalidToken)" ||
+			warn "Failed to harden Telegram connect-retry (continuing)"
+	fi
+
+	# The gateway wraps adapter.connect() in an outer asyncio timeout (default
+	# ~30s). The InvalidToken-widened retry loop above backs off 1+2+4+8+15+15+15s
+	# across its 8 attempts (~60s) before the route reliably propagates — so the
+	# 30s wrapper kills it mid-retry (~attempt 5) and Telegram fails permanently
+	# on a transient. Give the loop room to finish. Honor an operator override.
+	export HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT="${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT:-180}"
+	log "✓ Telegram connect timeout -> ${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT}s"
 fi
 
 # ── Polling mode: clear any stale webhook so getUpdates can take over ──────────
@@ -638,7 +671,11 @@ import urllib.request
 
 base = os.environ["TELEGRAM_API_BASE"]
 token = os.environ["TELEGRAM_BOT_TOKEN"]
-with urllib.request.urlopen(f"{base}{token}/deleteWebhook", timeout=15) as resp:
+# A browser User-Agent is mandatory when routed through the Cloudflare proxy:
+# its bot firewall 403s the default Python-urllib UA ("error code: 1010"), which
+# would silently fail the clear and leave a webhook active → getUpdates Conflict.
+req = urllib.request.Request(f"{base}{token}/deleteWebhook", headers={"User-Agent": "Mozilla/5.0"})
+with urllib.request.urlopen(req, timeout=15) as resp:
     data = json.loads(resp.read())
 # Telegram answers HTTP 200 with {"ok": false, ...} for API-level failures, so a
 # non-2xx exception alone is not enough — assert ok so a soft failure reaches warn.

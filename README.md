@@ -274,6 +274,45 @@ HF Space port 7861
 
 `start.sh` boots Hermes Agent's gateway + dashboard + WebUI as subprocesses, then the router on top. `hermes-sync.py` runs the periodic HF Dataset upload loop. Cloudflare and Telegram setup runs once at boot if their respective secrets are set.
 
+### Telegram on HF Spaces (webhook vs polling)
+
+The Telegram bridge runs in one of two modes, set by the `TELEGRAM_MODE` Space variable:
+
+| Mode | How it works | Needs |
+|------|--------------|-------|
+| `webhook` (default) | Telegram POSTs each inbound message to `https://<your-space>.hf.space/telegram` | A **public** Space with a reachable HTTPS URL |
+| `polling` | The bot pulls updates from Telegram via long-poll `getUpdates` (outbound only) | Works behind a **private** Space; on HF requires the Cloudflare proxy |
+
+#### ⚠️ Private Spaces must use `TELEGRAM_MODE=polling`
+
+A **private** HF Space rejects inbound HTTP, so Telegram can never deliver a webhook to it — the bot starts cleanly, logs no error, and simply never replies. The fix:
+
+1. Settings → Variables and secrets → add Variable `TELEGRAM_MODE=polling`
+2. Restart the Space.
+
+On a healthy polling boot the Logs tab shows `webhook cleared (polling mode)` and the bot replies. (If your Space is public, the default `webhook` mode is fine and slightly lower-latency.)
+
+#### Why Telegram needs the Cloudflare proxy at all
+
+HF Spaces block outbound traffic to `api.telegram.org`. When `CLOUDFLARE_WORKERS_TOKEN` is set, boot auto-provisions a Cloudflare Worker (`*.workers.dev`) that proxies Telegram calls. `start.sh` derives the worker URL fresh each boot (from `SPACE_HOST`) and writes it into `config.yaml` as `telegram.extra.base_url`; the gateway dials Telegram through that proxy.
+
+#### Required keys for Telegram on HF
+
+Set these as Space **secrets** (Settings → Variables and secrets); never paste secret values into the README, dashboard Env tab, or `config.yaml`:
+
+| Key | Purpose |
+|-----|---------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs allowed to use the bot |
+| `CLOUDFLARE_WORKERS_TOKEN` | Provisions the outbound Telegram proxy + keep-alive worker |
+| `HF_TOKEN` | Persistence + private-space privacy detection |
+| `GATEWAY_TOKEN` | Login/API password |
+| Provider key + model | e.g. `GEMINI_API_KEY` (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) and the matching model |
+
+And as a Space **variable**: `TELEGRAM_MODE=polling` (mandatory for private Spaces).
+
+> `GEMINI_API_KEY` is singular for a single key; the pooled form is `GEMINI_API_KEYS` and takes a **JSON array**, not a CSV.
+
 ### Local Testing
 
 Plain container run (mirrors a public Space):
@@ -288,6 +327,10 @@ docker run --rm -p 7861:7861 --env-file .env hermes
 # open http://localhost:7861
 ```
 
+### Reproducing the HF environment locally (`run-local-hf.sh`)
+
+`run-local-hf.sh` boots the container with `SPACE_ID`/`SPACE_HOST` set so it takes the exact **HF code path** (Cloudflare proxy, privacy detection, etc.) — useful for debugging Telegram and proxy issues without redeploying. Because `localhost:7861` is not a Telegram-allowed webhook port, the local runner forces `TELEGRAM_MODE=polling`. A successful run shows the Cloudflare worker going live and a Telegram `getMe` returning `ok=True`.
+
 ### Extended Troubleshooting
 
 | Symptom | Cause / Fix |
@@ -299,6 +342,10 @@ docker run --rm -p 7861:7861 --env-file .env hermes
 | Dashboard pages blank or 404 on refresh | Should be fixed by the SPA rewriter in health-server.js. Hard-refresh and unregister service worker if cached: DevTools → Application → Service Workers → Unregister |
 | Space sleeps after a few hours | Free tier limitation. Add `CLOUDFLARE_WORKERS_TOKEN` to provision a keep-alive cron worker |
 | Telegram bot doesn't respond | HF Spaces blocks `api.telegram.org` egress. Add `CLOUDFLARE_WORKERS_TOKEN` to auto-provision an outbound proxy |
+| Telegram silent on a **private** Space (no error, never replies) | Private Spaces can't receive webhooks. Set Space variable `TELEGRAM_MODE=polling` and restart |
+| Telegram `InvalidToken` error (token is actually correct) | A stale proxy URL was used after the previous Worker was deleted. `start.sh` now re-syncs `telegram.extra.base_url` to the current worker each boot — restart to pick it up |
+| Telegram/proxy fails with Cloudflare "error code: 1010" | Cloudflare's bot firewall 403s the default `Python-urllib` User-Agent; calls through the proxy must send a browser UA (`Mozilla/5.0`) — handled in `start.sh`/`cloudflare-proxy-setup.py` |
+| `getUpdates Conflict: can't use getUpdates while webhook is active` | A webhook was left registered before switching to polling. The polling-mode boot calls `deleteWebhook` to clear it; restart in polling mode |
 | Two Spaces overwriting each other's backup | Set different `BACKUP_DATASET_NAME` on each |
 | Agent responds but cannot answer questions | No LLM provider configured. Add provider API keys and restart, or configure via `/hm/app/config` |
 
