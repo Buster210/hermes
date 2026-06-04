@@ -311,7 +311,7 @@ Set these as Space **secrets** (Settings → Variables and secrets); never paste
 
 And as a Space **variable**: `TELEGRAM_MODE=polling` (mandatory for private Spaces).
 
-> `GEMINI_API_KEY` is singular for a single key; the pooled form is `GEMINI_API_KEYS` and takes a **JSON array**, not a CSV.
+> **Key pools (round-robin):** any provider takes a `*_API_KEYS` pool var (e.g. `OPENROUTER_API_KEYS`, `GEMINI_API_KEYS`, `ANTHROPIC_API_KEYS`) holding multiple keys — comma-separated **or** a JSON array. Hermes registers them as a credential pool and rotates round-robin. A pool supersedes the singular `*_API_KEY`. Keys are synced idempotently across restarts (added once; only new/changed keys re-sync on reboot). Supported: `GEMINI`, `OPENROUTER`, `ANTHROPIC`, `OPENAI`, `DEEPSEEK`, `XAI`, `KIMI`, `MINIMAX`, `NVIDIA`, `KILOCODE`, `GLM`, `ARCEEAI`, `DASHSCOPE`, `GMI`, `TOKENHUB`.
 
 ### Local Testing
 

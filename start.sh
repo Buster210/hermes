@@ -300,6 +300,9 @@ opencode-zen)
 opencode-go)
 	[ -n "$LLM_API_KEY" ] && export OPENCODE_GO_API_KEY="${OPENCODE_GO_API_KEY:-$LLM_API_KEY}"
 	;;
+ollama-cloud | ollama)
+	[ -n "$LLM_API_KEY" ] && export OLLAMA_API_KEY="${OLLAMA_API_KEY:-$LLM_API_KEY}"
+	;;
 esac
 
 if [ -n "${CUSTOM_BASE_URL:-}" ]; then
@@ -481,61 +484,223 @@ promote_first_pool_key "ARCEEAI_API_KEY"      "ARCEEAI_API_KEYS"
 promote_first_pool_key "DASHSCOPE_API_KEY"    "DASHSCOPE_API_KEYS"
 promote_first_pool_key "GMI_API_KEY"          "GMI_API_KEYS"
 promote_first_pool_key "TOKENHUB_API_KEY"     "TOKENHUB_API_KEYS"
+promote_first_pool_key "OLLAMA_API_KEY"       "OLLAMA_API_KEYS"
 
 # ── Hermes config setup (via CLI, not YAML) ───────────────────────────────
 log "Configuring Hermes via CLI"
 
-# MODEL_FOR_CONFIG and PROVIDER_FOR_CONFIG already extracted above (lines 181-275)
+# ── hermes update on rerun (every boot after the first) ───────────────
+if python3 - <<'PY'
+import json, os, sys
+from pathlib import Path
+state = Path(os.environ["HERMES_HOME"]) / ".hermes" / "keys-state.json"
+try:
+    done = json.loads(state.read_text(encoding="utf-8")).get("first_run_done") is True
+except Exception:
+    done = False
+sys.exit(0 if done else 1)
+PY
+then
+	log "Re-run detected — running hermes update"
+	hermes update >/dev/null 2>&1 || warn "hermes update failed (continuing)"
+fi
 
-# ── Gemini key pooling (support JSON array or single key) ───────────────────
-if [ -n "${GEMINI_API_KEYS:-}" ]; then
-	log "Parsing GEMINI_API_KEYS"
-	python3 - <<'PYKEYS'
+# ── Idempotent API-key sync (pools + singular provider keys) ────────────────
+log "Syncing API keys (idempotent)"
+python3 - <<'PYKEYS' || warn "key sync failed (continuing)"
+import hashlib
 import json
-import sys
 import os
 import subprocess
+import sys
+from pathlib import Path
 
-raw = os.environ.get("GEMINI_API_KEYS", "")
-keys = []
+SINGULAR_PROVIDERS = {
+    "OPENROUTER_API_KEY": "openrouter",
+    "ANTHROPIC_API_KEY": "anthropic",
+    "OPENAI_API_KEY": "openai",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "KIMI_API_KEY": "moonshot",
+    "KIMI_CN_API_KEY": "moonshot-cn",
+    "MINIMAX_API_KEY": "minimax",
+    "MINIMAX_CN_API_KEY": "minimax-cn",
+    "XAI_API_KEY": "xai",
+    "NVIDIA_API_KEY": "nvidia",
+    "OLLAMA_API_KEY": "ollama-cloud",
+    "KILOCODE_API_KEY": "kilocode",
+    "GLM_API_KEY": "zai",
+    "ARCEEAI_API_KEY": "arcee",
+    "DASHSCOPE_API_KEY": "alibaba",
+    "GMI_API_KEY": "gmi",
+    "TOKENHUB_API_KEY": "tencent-tokenhub",
+    "HF_TOKEN": "huggingface",
+    "AI_GATEWAY_API_KEY": "ai-gateway",
+    "CUSTOM_API_KEY": "custom",
+}
 
+POOL_VARS = {
+    "OPENROUTER_API_KEYS": "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEYS":  "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEYS":     "OPENAI_API_KEY",
+    "DEEPSEEK_API_KEYS":   "DEEPSEEK_API_KEY",
+    "KIMI_API_KEYS":       "KIMI_API_KEY",
+    "MINIMAX_API_KEYS":    "MINIMAX_API_KEY",
+    "NVIDIA_API_KEYS":     "NVIDIA_API_KEY",
+    "OLLAMA_API_KEYS":     "OLLAMA_API_KEY",
+    "XAI_API_KEYS":        "XAI_API_KEY",
+    "KILOCODE_API_KEYS":   "KILOCODE_API_KEY",
+    "GLM_API_KEYS":        "GLM_API_KEY",
+    "ARCEEAI_API_KEYS":    "ARCEEAI_API_KEY",
+    "DASHSCOPE_API_KEYS":  "DASHSCOPE_API_KEY",
+    "GMI_API_KEYS":        "GMI_API_KEY",
+    "TOKENHUB_API_KEYS":   "TOKENHUB_API_KEY",
+}
+
+HERMES_HOME = Path(os.environ["HERMES_HOME"])
+STATE_FILE = HERMES_HOME / ".hermes" / "keys-state.json"
+
+STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 try:
-    # Try JSON array first
-    keys = json.loads(raw)
+    keys_state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    if not isinstance(keys_state, dict):
+        keys_state = {}
 except Exception:
+    keys_state = {}
+keys_state.setdefault("schema", 1)
+applied = keys_state.setdefault("applied", {})
+first_run = not keys_state.get("first_run_done")
+
+
+def parse_pool(raw):
+    """Parse a pool var as a JSON array first (back-compat with Gemini), else
+    comma-separated. Returns a list of non-empty trimmed keys."""
+    raw = (raw or "").replace("\x00", "").replace("\x1f", "").strip()
+    if not raw:
+        return []
     try:
-        # Try with control chars stripped
-        keys = json.loads(raw.replace('\x00', '').replace('\x1f', ''))
-    except Exception as e:
-        sys.stderr.write(f"ERROR parsing GEMINI_API_KEYS: {e}\n")
-        sys.exit(0)
+        v = json.loads(raw)
+        if isinstance(v, list):
+            return [str(k).strip() for k in v if str(k).strip()]
+    except Exception:
+        pass
+    return [p.strip() for p in raw.split(",") if p.strip()]
 
-if not isinstance(keys, list):
-    sys.stderr.write("ERROR: GEMINI_API_KEYS must be a JSON list\n")
-    sys.exit(0)
 
-# Reset pool first
-subprocess.run(["hermes", "auth", "remove", "gemini", "1"], capture_output=True)
+def parse_gemini_keys():
+    keys = parse_pool(os.environ.get("GEMINI_API_KEYS", ""))
+    if keys:
+        return keys
+    single = os.environ.get("GEMINI_API_KEY", "").strip()
+    return [single] if single else []
 
-added = 0
-for key in keys:
-    key = str(key).strip()
-    if key:
-        if subprocess.run(["hermes", "auth", "add", "gemini", "--type", "api-key", "--api-key", key],
-                         capture_output=True).returncode == 0:
-            added += 1
 
-if added > 0:
-    print(f"✓ Gemini pool seeded with {added} key(s)")
-    # Enable round-robin rotation
-    subprocess.run(["hermes", "config", "set", "credential_pool_strategies.gemini", "round_robin"],
-                  capture_output=True)
+registry = {}
+gemini_keys = parse_gemini_keys()
+if gemini_keys:
+    norm = "\n".join(sorted(gemini_keys))
+    registry["gemini:pool"] = (
+        "pool", "gemini", gemini_keys,
+        hashlib.sha256(norm.encode("utf-8")).hexdigest(),
+    )
+
+pooled_singulars = set()
+for pool_var, singular_var in POOL_VARS.items():
+    slug = SINGULAR_PROVIDERS.get(singular_var)
+    if not slug:
+        continue
+    keys = parse_pool(os.environ.get(pool_var, ""))
+    if not keys:
+        continue
+    pooled_singulars.add(singular_var)
+    norm = "\n".join(sorted(keys))
+    registry[f"{slug}:pool"] = (
+        "pool", slug, keys,
+        hashlib.sha256(norm.encode("utf-8")).hexdigest(),
+    )
+
+for env_var, slug in SINGULAR_PROVIDERS.items():
+    if env_var in pooled_singulars:
+        continue
+    val = os.environ.get(env_var, "").strip()
+    if not val:
+        continue
+    registry[f"{slug}:{env_var}"] = (
+        "single", slug, val,
+        hashlib.sha256(val.encode("utf-8")).hexdigest(),
+    )
+
+
+def unset_provider(provider):
+    """Clear a provider's credential pool via the CLI — schema-agnostic, no
+    config.yaml parse. Remove index 1 repeatedly until the pool is empty
+    (rc != 0). Hard-capped so a misbehaving CLI can't loop forever."""
+    for _ in range(100):
+        if subprocess.run(
+            ["hermes", "auth", "remove", provider, "1"],
+            capture_output=True,
+        ).returncode != 0:
+            break
+
+
+def add_pool(provider, keys):
+    """Add every pool key; return True only if all succeeded. A pool has no env
+    auto-discovery fallback, so a partial failure must NOT record the hash —
+    leave it unrecorded to retry next boot."""
+    ok = True
+    for key in keys:
+        if subprocess.run(
+            ["hermes", "auth", "add", provider, "--type", "api-key", "--api-key", key],
+            capture_output=True,
+        ).returncode != 0:
+            ok = False
+    if len(keys) > 1:
+        subprocess.run(
+            ["hermes", "config", "set", f"credential_pool_strategies.{provider}", "round_robin"],
+            capture_output=True,
+        )
+    if not ok:
+        sys.stderr.write(
+            f"WARN: one or more `hermes auth add {provider}` failed; pool hash not recorded (retry next boot)\n"
+        )
+    return ok
+
+
+def add_single(slug, value):
+    """A failed singular add still works via env auto-discovery (var already
+    exported), so it counts as success — record the hash to avoid re-adding."""
+    rc = subprocess.run(
+        ["hermes", "auth", "add", slug, "--type", "api-key", "--api-key", value],
+        capture_output=True,
+    ).returncode
+    if rc != 0:
+        sys.stderr.write(
+            f"WARN: `hermes auth add {slug}` failed (rc={rc}); relying on env auto-discovery\n"
+        )
+    return True
+
+
+synced = 0
+skipped = 0
+for key_id, (kind, provider, payload, h) in registry.items():
+    if not first_run and applied.get(key_id) == h:
+        skipped += 1
+        continue
+    unset_provider(provider)
+    ok = add_pool(provider, payload) if kind == "pool" else add_single(provider, payload)
+    if ok:
+        applied[key_id] = h
+        synced += 1
+
+for stale in [k for k in applied if k not in registry]:
+    del applied[stale]
+    sys.stderr.write(f"WARN: {stale} removed from env; dropped from state (pool left intact)\n")
+
+keys_state["first_run_done"] = True
+STATE_FILE.write_text(json.dumps(keys_state, indent=2), encoding="utf-8")
+STATE_FILE.chmod(0o600)
+
+print(f"Key sync: synced {synced} new, skipped {skipped}, first_run={str(first_run).lower()}")
 PYKEYS
-elif [ -n "${GEMINI_API_KEY:-}" ]; then
-	log "Adding single Gemini API key"
-	hermes auth add gemini --type api-key --api-key "${GEMINI_API_KEY}" >/dev/null 2>&1 ||
-		warn "Failed to add Gemini API key"
-fi
 
 # ── Set model + provider via CLI (more reliable than YAML) ───────────────────
 hermes config set model "$MODEL_FOR_CONFIG" &&

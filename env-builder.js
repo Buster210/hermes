@@ -10,14 +10,13 @@ const MODEL_CATALOGS = {
       "anthropic/claude-haiku-3-5"
     ],
     "Gemini": [
-      "gemini/gemini-2.5-pro-preview-06-05",
-      "gemini/gemini-2.5-flash-preview-05-20",
+      "gemini/gemini-3.5-flash",
+      "gemini/gemini-3.1-flash-lite",
+      "gemini/gemini-3-flash-preview",
       "gemini/gemini-2.5-flash",
-      "gemini/gemini-2.0-flash",
-      "gemini/gemini-1.5-pro",
-      "gemini/gemini-1.5-flash",
-      "google/gemini-2.5-flash",
-      "google/gemini-2.0-flash"
+      "gemini/gemini-2.5-flash-lite",
+      "gemini/gemma-4-31b-it",
+      "gemini/gemma-4-26b-a4b-it"
     ],
     "OpenAI": [
       "openai/gpt-4.1",
@@ -222,9 +221,21 @@ const FIELDS = [
   },
   {
     "g": "Providers", "icon": "🔑",
+    "k": "ANTHROPIC_API_KEYS",
+    "lbl": "Anthropic API key pool (comma-separated; rotated round-robin)",
+    "type": "textarea", "ph": "key1, key2, key3", "tag": "credential"
+  },
+  {
+    "g": "Providers", "icon": "🔑",
     "k": "OPENAI_API_KEY",
     "lbl": "OpenAI API key",
     "type": "password", "secret": 1, "tag": "credential"
+  },
+  {
+    "g": "Providers", "icon": "🔑",
+    "k": "OPENAI_API_KEYS",
+    "lbl": "OpenAI API key pool (comma-separated; rotated round-robin)",
+    "type": "textarea", "ph": "key1, key2, key3", "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
@@ -240,9 +251,21 @@ const FIELDS = [
   },
   {
     "g": "Providers", "icon": "🔑",
+    "k": "GEMINI_API_KEYS",
+    "lbl": "Gemini API key pool (comma-separated; rotated round-robin)",
+    "type": "textarea", "ph": "key1, key2, key3", "tag": "credential"
+  },
+  {
+    "g": "Providers", "icon": "🔑",
     "k": "OPENROUTER_API_KEY",
     "lbl": "OpenRouter API key",
     "type": "password", "secret": 1, "tag": "credential"
+  },
+  {
+    "g": "Providers", "icon": "🔑",
+    "k": "OPENROUTER_API_KEYS",
+    "lbl": "OpenRouter API key pool (comma-separated; rotated round-robin)",
+    "type": "textarea", "ph": "key1, key2, key3", "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
@@ -252,9 +275,21 @@ const FIELDS = [
   },
   {
     "g": "Providers", "icon": "🔑",
+    "k": "DEEPSEEK_API_KEYS",
+    "lbl": "DeepSeek API key pool (comma-separated; rotated round-robin)",
+    "type": "textarea", "ph": "key1, key2, key3", "tag": "credential"
+  },
+  {
+    "g": "Providers", "icon": "🔑",
     "k": "XAI_API_KEY",
     "lbl": "xAI (Grok) API key",
     "type": "password", "secret": 1, "tag": "credential"
+  },
+  {
+    "g": "Providers", "icon": "🔑",
+    "k": "XAI_API_KEYS",
+    "lbl": "xAI (Grok) API key pool (comma-separated; rotated round-robin)",
+    "type": "textarea", "ph": "key1, key2, key3", "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
