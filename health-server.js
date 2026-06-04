@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const net = require("net");
 const crypto = require("crypto");
@@ -23,6 +24,109 @@ const PRIMARY_UI = (process.env.PRIMARY_UI || "webui").toLowerCase();
 const SYNC_STATUS_FILE = "/tmp/hermes-sync-status.json";
 const CLOUDFLARE_KEEPALIVE_STATUS_FILE =
   "/tmp/hermes-cloudflare-keepalive-status.json";
+
+// ── Private Space redirect support ──
+const SPACE_ID = (process.env.SPACE_ID || "").trim();
+function deriveHfSpaceUrl() {
+  if (SPACE_ID) return `https://huggingface.co/spaces/${SPACE_ID}`;
+  const host = (process.env.SPACE_HOST || "").replace(/\.hf\.space$/i, "");
+  const author = (process.env.SPACE_AUTHOR_NAME || "").trim().toLowerCase();
+  if (author && host.toLowerCase().startsWith(author + "-")) {
+    const spaceName = host.slice(author.length + 1);
+    return `https://huggingface.co/spaces/${process.env.SPACE_AUTHOR_NAME}/${spaceName}`;
+  }
+  return "";
+}
+const HF_SPACE_URL = deriveHfSpaceUrl();
+
+// Privacy detection priority:
+//   1. SPACE_PRIVACY env var ("public"/"private") — explicit override, skip API call
+//   2. HF API auto-detect with retry
+//   3. Fail-secure: treat as private if SPACE_ID set
+const _spacPrivacyEnv = (process.env.SPACE_PRIVACY || "").trim().toLowerCase();
+let SPACE_IS_PRIVATE;
+let _privacyDetectionDone = false;
+let _privacyDetectionResolve;
+const privacyDetectionReady = new Promise((res) => { _privacyDetectionResolve = res; });
+
+if (_spacPrivacyEnv === "public") {
+  SPACE_IS_PRIVATE = false;
+  _privacyDetectionDone = true;
+  console.log("[health-server] Space privacy: public (SPACE_PRIVACY env override)");
+  _privacyDetectionResolve();
+} else if (_spacPrivacyEnv === "private") {
+  SPACE_IS_PRIVATE = true;
+  _privacyDetectionDone = true;
+  console.log("[health-server] Space privacy: private (SPACE_PRIVACY env override)");
+  _privacyDetectionResolve();
+} else {
+  // Fail-secure default until API call resolves
+  SPACE_IS_PRIVATE = !!SPACE_ID;
+}
+
+async function detectSpacePrivacy() {
+  if (_spacPrivacyEnv === "public" || _spacPrivacyEnv === "private") return;
+  if (!SPACE_ID) {
+    SPACE_IS_PRIVATE = false;
+    _privacyDetectionDone = true;
+    _privacyDetectionResolve();
+    return;
+  }
+  const token = (process.env.HF_TOKEN || "").trim();
+  const reqOptions = {
+    hostname: "huggingface.co",
+    path: `/api/spaces/${SPACE_ID}`,
+    method: "GET",
+    headers: Object.assign(
+      { "User-Agent": "Hermes/health-server" },
+      token ? { Authorization: `Bearer ${token}` } : {}
+    ),
+  };
+  const MAX_ATTEMPTS = 5;
+  let detected = false;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await new Promise((resolve) => {
+        const r = https.request(reqOptions, (apiRes) => {
+          let body = "";
+          apiRes.on("data", (chunk) => { body += chunk; });
+          apiRes.on("end", () => {
+            try {
+              if (apiRes.statusCode === 200) {
+                SPACE_IS_PRIVATE = JSON.parse(body).private === true;
+                resolve({ ok: true });
+              } else if (apiRes.statusCode === 401 || apiRes.statusCode === 403) {
+                SPACE_IS_PRIVATE = true;
+                resolve({ ok: true });
+              } else {
+                resolve({ ok: false });
+              }
+            } catch { resolve({ ok: false }); }
+          });
+        });
+        r.on("error", () => resolve({ ok: false }));
+        r.setTimeout(8000, () => { r.destroy(); resolve({ ok: false }); });
+        r.end();
+      });
+      console.log(`[health-server] Privacy detection attempt ${attempt}/${MAX_ATTEMPTS}: ok=${result.ok}`);
+      if (result.ok) { detected = true; break; }
+    } catch {}
+    const delay = Math.min(2000 * attempt, 10000);
+    if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, delay));
+  }
+  if (!detected) {
+    console.warn(`[health-server] Privacy detection failed after ${MAX_ATTEMPTS} attempts — defaulting to ${SPACE_IS_PRIVATE ? "private" : "public"}. TIP: Set SPACE_PRIVACY=public in Space secrets to skip API detection.`);
+  } else {
+    console.log(`[health-server] Space privacy detected: ${SPACE_IS_PRIVATE ? "private" : "public"}`);
+  }
+  _privacyDetectionDone = true;
+  _privacyDetectionResolve();
+}
+
+if (_spacPrivacyEnv !== "public" && _spacPrivacyEnv !== "private") {
+  detectSpacePrivacy();
+  setInterval(detectSpacePrivacy, 5 * 60 * 1000);
+}
 
 function canConnect(port, host = GATEWAY_HOST, timeoutMs = 600) {
   return new Promise((resolve) => {
@@ -127,6 +231,43 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderPrivateRedirect(targetUrl) {
+  const safeUrl = escapeHtml(targetUrl);
+  return `<!doctype html><html lang="en"><head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta http-equiv="refresh" content="3;url=${safeUrl}"/>
+  <title>Hermes — Private Space</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+         font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+         background:#08080f;color:#f6f4ff;text-align:center;padding:24px}
+    .card{border:1px solid #26243a;background:#12111b;border-radius:14px;padding:36px 32px;max-width:440px}
+    h1{margin:0 0 12px;font-size:1.5rem}
+    p{color:#b8b3d7;line-height:1.6;margin:0 0 24px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;
+         background:#fff;color:#000;font-weight:850;font-size:.95rem;
+         border-radius:8px;padding:12px 28px;text-decoration:none;transition:opacity .15s}
+    .btn:hover{opacity:.85}
+    .sub{color:#7f7a9e;font-size:.78rem;margin-top:16px}
+  </style></head><body>
+  <div class="card">
+    <h1>🔒 Private Space</h1>
+    <p>This HuggingFace Space is private. You need to be logged in to <strong>huggingface.co</strong> to access it.<br><br>Redirecting you now&hellip;</p>
+    <a class="btn" href="${safeUrl}">Open on Hugging Face →</a>
+    <div class="sub">Redirecting in 3 seconds&hellip;</div>
+  </div>
+  <script>
+    // Only auto-redirect when NOT inside an iframe — navigating an iframe to
+    // huggingface.co is blocked by X-Frame-Options and causes "refused to connect".
+    const _inFrame = (() => { try { return window.top !== window.self; } catch { return true; } })();
+    if (!_inFrame) {
+      setTimeout(() => { window.location.replace(${JSON.stringify(targetUrl)}); }, 100);
+    }
+  </script>
+</body></html>`;
 }
 
 function isDashboardAssetPath(path) {
@@ -677,6 +818,33 @@ function renderStatusPage(data) {
       }, delay);
     }
     scheduleNext();
+
+    // Sync privacy detection on client side.
+    const inEmbeddedApp = (() => { try { return window.top !== window.self; } catch { return true; } })();
+    const isDirectHfSpaceHost = /\.hf\.space$/i.test(window.location.hostname);
+    const HF_SPACE_URL = ${JSON.stringify(HF_SPACE_URL)};
+    let SPACE_IS_PRIVATE = ${JSON.stringify(SPACE_IS_PRIVATE)};
+
+    function syncPrivacy() {
+      return fetch('/api/is-private', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(d => {
+          if (d.isPrivate !== SPACE_IS_PRIVATE) {
+            SPACE_IS_PRIVATE = d.isPrivate;
+          }
+          return d.isPrivate;
+        })
+        .catch(() => SPACE_IS_PRIVATE);
+    }
+
+    if (isDirectHfSpaceHost && !inEmbeddedApp) {
+      syncPrivacy().then(isPrivate => {
+        if (isPrivate) {
+          setTimeout(syncPrivacy, 8000);
+          setTimeout(syncPrivacy, 16000);
+        }
+      });
+    }
   </script>
 </body>
 </html>`;
@@ -714,6 +882,25 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(data, null, 2));
     return;
+  }
+
+  // Lightweight endpoint for client-side privacy fallback.
+  // Called by status page JS to correct stale server-rendered SPACE_IS_PRIVATE value.
+  // No auth required — not sensitive.
+  if (path === "/api/is-private") {
+    if (!_privacyDetectionDone) await privacyDetectionReady;
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    return res.end(JSON.stringify({ isPrivate: SPACE_IS_PRIVATE }));
+  }
+
+  // Private Space redirect unauth route — external entry point that always redirects.
+  if (path === "/hf-redirect" || path === "/hf-redirect/") {
+    if (HF_SPACE_URL) {
+      res.writeHead(302, { location: HF_SPACE_URL, "cache-control": "no-store" });
+      return res.end();
+    }
+    res.writeHead(404, { "content-type": "text/plain" });
+    return res.end("SPACE_ID not configured.");
   }
 
   // ENV Builder — token-gated helper that generates a .env from a guided form.
@@ -891,6 +1078,30 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderStatusPage(data));
     return;
+  }
+
+  // ── Private Space redirect for HTML root requests ──
+  // On a public HF Space, never redirect. On a private Space hit directly via
+  // .hf.space (not HF-logged-in, not framed), serve a "private space" page
+  // that meta-refreshes to the canonical HF URL but suppresses the redirect
+  // inside an iframe (avoids X-Frame-Options: DENY "refused to connect").
+  const isHtmlReq = (req.headers.accept || "").includes("text/html");
+  const isDirectHfSpaceReq = SPACE_IS_PRIVATE &&
+    HF_SPACE_URL &&
+    isHtmlReq &&
+    typeof req.headers.host === "string" &&
+    req.headers.host.endsWith(".hf.space");
+
+  if (isDirectHfSpaceReq && !_privacyDetectionDone) {
+    await Promise.race([
+      privacyDetectionReady,
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
+  }
+
+  if (path === "/" && isDirectHfSpaceReq && SPACE_IS_PRIVATE) {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    return res.end(renderPrivateRedirect(HF_SPACE_URL));
   }
 
   proxyRequest(req, res, WEBUI_PORT);

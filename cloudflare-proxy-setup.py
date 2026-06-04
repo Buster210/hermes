@@ -15,6 +15,8 @@ from pathlib import Path
 API_BASE = "https://api.cloudflare.com/client/v4"
 ENV_FILE = Path("/tmp/hermes-cloudflare-proxy.env")
 DEFAULT_ALLOWED = [
+    # Messaging & social — primary use-case for Cloudflare proxy on HF Spaces
+    # (geo-restrictions on Telegram, Discord, WhatsApp, etc.)
     "api.telegram.org",
     "discord.com",
     "discordapp.com",
@@ -23,14 +25,23 @@ DEFAULT_ALLOWED = [
     "slack.com",
     "api.slack.com",
     "web.whatsapp.com",
+    # Social — confirmed/likely blocked by HF firewall
     "graph.facebook.com",
     "graph.instagram.com",
-    "api.openai.com",
+    "api.twitter.com",
+    "api.x.com",
+    # Google
     "googleapis.com",
     "google.com",
     "googleusercontent.com",
     "gstatic.com",
-    # AI-provider domains excluded: proxied calls route API keys through Worker.
+    # Email HTTP APIs (SMTP ports are blocked)
+    "api.resend.com",
+    "api.sendgrid.com",
+    # NOTE: AI-provider domains (api.openai.com, api.anthropic.com, etc.) are
+    # intentionally NOT included here. Proxying AI calls routes API keys through
+    # the Cloudflare Worker without explicit opt-in. Users who need AI API calls
+    # proxied can add specific domains via CLOUDFLARE_PROXY_DOMAINS env var.
 ]
 
 

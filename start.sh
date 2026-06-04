@@ -25,6 +25,7 @@ HERMES_DATA_ROOT="${HERMES_HOME:-/opt/data}"
 AGENT_NAME="${AGENT_NAME:-primary}"
 HERMES_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}/.hermes"
 WORKSPACE_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}/workspace"
+STARTUP_FILE="$WORKSPACE_HOME/startup.sh"
 
 log "Agent: $AGENT_NAME"
 log "State: $HERMES_HOME"
@@ -320,6 +321,167 @@ if [ -n "${CLOUDFLARE_PROXY_URL:-}" ] && [ -z "$TELEGRAM_BASE_URL" ]; then
 	export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
 fi
 
+# ── Shell capture wrappers ─────────────────────────────────────────────────
+# Written to ~/.bashrc so terminal installs are recorded in workspace/startup.sh
+# and replayed on next boot — packages survive Space restarts.
+if [ ! -f "$STARTUP_FILE" ]; then
+	mkdir -p "$WORKSPACE_HOME"
+	touch "$STARTUP_FILE"
+	chmod +x "$STARTUP_FILE"
+	echo "Created workspace/startup.sh"
+fi
+cat > "$HOME/.bashrc" << 'BASHRC'
+export PATH="/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH"
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
+if [ -z "${PS1:-}" ] || [ "$PS1" = "$ " ]; then
+  export PS1="\u@\h:\w\$ "
+fi
+
+_hm_append() {
+  [ "${HERMES_CAPTURE_DISABLE:-0}" = "1" ] && return 0
+  local line="$*"
+  mkdir -p "$(dirname "$STARTUP_FILE")"
+  touch "$STARTUP_FILE"
+  chmod +x "$STARTUP_FILE" 2>/dev/null || true
+  grep -qxF "$line" "$STARTUP_FILE" 2>/dev/null || echo "$line" >> "$STARTUP_FILE"
+}
+_hm_quote_args() {
+  local quoted=()
+  local arg
+  for arg in "$@"; do
+    printf -v arg '%q' "$arg"
+    quoted+=("$arg")
+  done
+  printf '%s' "${quoted[*]}"
+}
+_hm_append_cmd() {
+  local cmd="$1"
+  shift
+  local args
+  args=$(_hm_quote_args "$@")
+  if [ -n "$args" ]; then
+    _hm_append "$cmd $args"
+  else
+    _hm_append "$cmd"
+  fi
+}
+_hm_args_without_flags() {
+  local out=()
+  for arg in "$@"; do
+    case "$arg" in
+      ''|-|--*|-*) ;;
+      *) out+=("$arg") ;;
+    esac
+  done
+  printf '%s\n' "${out[@]}"
+}
+_hm_has_install_targets() {
+  local item
+  while IFS= read -r item; do
+    [ -n "$item" ] && return 0
+  done <<EOF
+$(_hm_args_without_flags "$@")
+EOF
+  return 1
+}
+_hm_has_arg() {
+  local needle="$1"
+  shift
+  for arg in "$@"; do
+    [ "$arg" = "$needle" ] && return 0
+  done
+  return 1
+}
+pip() {
+  command pip "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "install" ] \
+      && ! _hm_has_arg -r "${@:2}" && ! _hm_has_arg --requirement "${@:2}" \
+      && _hm_has_install_targets "${@:2}"; then
+    _hm_append_cmd "pip install" "${@:2}"
+  fi
+  return $rc
+}
+pip3() {
+  command pip3 "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "install" ] \
+      && ! _hm_has_arg -r "${@:2}" && ! _hm_has_arg --requirement "${@:2}" \
+      && _hm_has_install_targets "${@:2}"; then
+    _hm_append_cmd "pip install" "${@:2}"
+  fi
+  return $rc
+}
+uv() {
+  command uv "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "pip" ] && [ "${2:-}" = "install" ] \
+      && ! _hm_has_arg -r "${@:3}" && ! _hm_has_arg --requirements "${@:3}" \
+      && _hm_has_install_targets "${@:3}"; then
+    _hm_append_cmd "uv pip install" "${@:3}"
+  fi
+  return $rc
+}
+npm() {
+  command npm "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && { [ "${1:-}" = "install" ] || [ "${1:-}" = "i" ]; } && { [ "${2:-}" = "-g" ] || [ "${2:-}" = "--global" ]; } && _hm_has_install_targets "${@:3}"; then
+    _hm_append_cmd "npm install -g" "${@:3}"
+  fi
+  return $rc
+}
+hermes() {
+  command hermes "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "plugins" ] && [ "${2:-}" = "install" ] && _hm_has_install_targets "${@:3}"; then
+    _hm_append_cmd "hermes plugins install" "${@:3}"
+  fi
+  return $rc
+}
+BASHRC
+# Pin capture target to the exact path the boot-replay reads; the interactive
+# shell may not inherit WORKSPACE_HOME, so bake the resolved value rather than
+# re-derive it (a wrong base path silently breaks capture/replay).
+printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.bashrc"
+cat > "$HOME/.profile" << 'PROFILE'
+[ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc
+PROFILE
+echo "Shell capture wrappers ready."
+
+# ── Pool key promotion ──
+# Mirror first key from comma-separated pool vars into the singular env var.
+# Hermes providers read singular vars; this lets users supply pool keys like
+# ANTHROPIC_API_KEYS=key1,key2 and have them picked up automatically.
+# Gemini excluded — WU's JSON-array round-robin is richer.
+promote_first_pool_key() {
+	local singular_var="$1"
+	local pool_var="$2"
+	local singular_val="${!singular_var:-}"
+	local pool_val="${!pool_var:-}"
+	[ -n "$singular_val" ] && return 0
+	[ -n "$pool_val" ] || return 0
+	local first
+	first=$(printf '%s' "$pool_val" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF{print; exit}')
+	[ -n "$first" ] || return 0
+	export "${singular_var}=$first"
+}
+
+promote_first_pool_key "OPENROUTER_API_KEY"   "OPENROUTER_API_KEYS"
+promote_first_pool_key "ANTHROPIC_API_KEY"    "ANTHROPIC_API_KEYS"
+promote_first_pool_key "OPENAI_API_KEY"       "OPENAI_API_KEYS"
+promote_first_pool_key "GOOGLE_API_KEY"       "GOOGLE_API_KEYS"
+promote_first_pool_key "DEEPSEEK_API_KEY"     "DEEPSEEK_API_KEYS"
+promote_first_pool_key "KIMI_API_KEY"         "KIMI_API_KEYS"
+promote_first_pool_key "MINIMAX_API_KEY"      "MINIMAX_API_KEYS"
+promote_first_pool_key "NVIDIA_API_KEY"       "NVIDIA_API_KEYS"
+promote_first_pool_key "XAI_API_KEY"          "XAI_API_KEYS"
+promote_first_pool_key "KILOCODE_API_KEY"     "KILOCODE_API_KEYS"
+promote_first_pool_key "GLM_API_KEY"          "GLM_API_KEYS"
+promote_first_pool_key "ARCEEAI_API_KEY"      "ARCEEAI_API_KEYS"
+promote_first_pool_key "DASHSCOPE_API_KEY"    "DASHSCOPE_API_KEYS"
+promote_first_pool_key "GMI_API_KEY"          "GMI_API_KEYS"
+promote_first_pool_key "TOKENHUB_API_KEY"     "TOKENHUB_API_KEYS"
+
 # ── Hermes config setup (via CLI, not YAML) ───────────────────────────────
 log "Configuring Hermes via CLI"
 
@@ -375,11 +537,6 @@ elif [ -n "${GEMINI_API_KEY:-}" ]; then
 		warn "Failed to add Gemini API key"
 fi
 
-# HF provider setup: configure HF as default when HF_TOKEN is available
-if [ -n "${HF_TOKEN:-}" ]; then
-	hermes model set-provider hf --default || warn "HF provider config failed (continuing)"
-fi
-
 # ── Set model + provider via CLI (more reliable than YAML) ───────────────────
 hermes config set model "$MODEL_FOR_CONFIG" &&
 	log "✓ Model: $MODEL_FOR_CONFIG" ||
@@ -405,6 +562,7 @@ hermes config set terminal.cwd "$WORKSPACE_HOME" 2>/dev/null || true
 hermes config set compression.enabled true 2>/dev/null || true
 # Redact secrets from agent output/logs by default — safe default for a hosted agent.
 hermes config set security.redact_secrets true 2>/dev/null || true
+hermes config set display.background_process_notifications "${HERMES_BACKGROUND_NOTIFICATIONS:-result}" 2>/dev/null || true
 
 # ── Telegram platform config (augments CLI-written config.yaml) ───────────────
 # `hermes config set` covers scalars; the telegram platform needs nested keys and
@@ -703,11 +861,15 @@ hm_run_startup() {
 	[ -n "$payload" ] || return 0
 	local script_file
 	script_file=$(mktemp "/tmp/hermes-startup.XXXXXX.sh")
-	if [[ "$payload" == base64:* ]] || [[ "$payload" == b64:* ]]; then
-		printf '%s' "${payload#*:}" | base64 -d >"$script_file"
-	else
-		printf '%s\n' "$payload" >"$script_file"
-	fi
+	{
+		echo 'export HERMES_CAPTURE_DISABLE=1'
+		echo '[ -f ~/.bashrc ] && . ~/.bashrc'
+		if [[ "$payload" == base64:* ]] || [[ "$payload" == b64:* ]]; then
+			printf '%s' "${payload#*:}" | base64 -d
+		else
+			printf '%s\n' "$payload"
+		fi
+	} > "$script_file"
 	chmod 700 "$script_file"
 	echo "[startup:HERMES_RUN] running script"
 	set +e
@@ -729,6 +891,16 @@ fi
 
 if [ "$HM_STARTUP_FAILURES" -gt 0 ]; then
 	echo "Warning: ${HM_STARTUP_FAILURES} startup step(s) failed. Check logs above." >&2
+fi
+
+# ── Run workspace startup script ──
+# Replays install commands recorded by the shell wrappers from previous sessions.
+if [ -s "$STARTUP_FILE" ]; then
+	echo "Running workspace/startup.sh..."
+	set +e
+	HERMES_CAPTURE_DISABLE=1 bash -l "$STARTUP_FILE"
+	set -e
+	echo "Workspace startup script complete."
 fi
 
 # Private; no readiness gate.
