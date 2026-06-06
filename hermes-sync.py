@@ -351,14 +351,17 @@ def restore() -> bool:
 
         if not bucket_prefix_empty(bucket_id):
             write_status("restored", f"Restored Hermes state from {uri}")
+            print(f"Hermes sync: restored state from bucket {uri}")
             return True
 
         # Empty prefix: try the one-time dataset migration, else start fresh.
         if MIGRATE_FROM_DATASET and migrate_from_dataset(uri):
             write_status("migrated", f"Migrated legacy dataset backup into {uri}")
+            print(f"Hermes sync: MIGRATED legacy dataset -> bucket {uri}")
             return True
 
         write_status("fresh", f"Backup prefix {AGENT_NAME} is empty. Starting fresh.")
+        print(f"Hermes sync: no backup for prefix '{AGENT_NAME}' — starting fresh")
         return True
     except RepositoryNotFoundError:
         write_status("fresh", f"Backup bucket for {uri} does not exist yet.")
