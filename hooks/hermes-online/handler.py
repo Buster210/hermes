@@ -91,6 +91,47 @@ def _claim_boot_once() -> bool:
 # state.db schema is owned upstream and unversioned here; the timestamp column
 # name varies across versions, so resolve it from a whitelist at query time.
 _TS_COL_CANDIDATES = ("created_at", "timestamp", "ts", "time", "created")
+_CONTENT_COL_CANDIDATES = ("content", "text", "message", "body", "data")
+
+
+def _recent_topic(limit: int = 4, max_len: int = 160) -> str:
+    """Best-effort gist of the most recent messages, for a warmer greeting that
+    can reference what we were last on. Empty on any issue so the greeting cleanly
+    falls back to the session-count context. Recipient is the user's own chat."""
+    if not os.path.exists(_STATE_DB):
+        return ""
+    try:
+        conn = sqlite3.connect(_STATE_DB, timeout=5)
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+            ts_col = next((c for c in _TS_COL_CANDIDATES if c in cols), None)
+            content_col = next((c for c in _CONTENT_COL_CANDIDATES if c in cols), None)
+            if ts_col is None or content_col is None:
+                return ""
+            # cols are from fixed whitelists, never user input → safe to inline.
+            role_filter = "WHERE role IN ('user', 'assistant') " if "role" in cols else ""
+            rows = conn.execute(
+                f"SELECT {content_col} FROM messages {role_filter}"
+                f"ORDER BY {ts_col} DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return ""
+    snippets = []
+    for (val,) in reversed(rows):
+        text = " ".join(str(val or "").split())
+        if not text:
+            continue
+        if len(text) > max_len:
+            text = text[:max_len] + "…"
+        snippets.append(text)
+    if not snippets:
+        return ""
+    return "Recent thread (for context — reference the gist, don't quote verbatim):\n" + "\n".join(
+        f"- {s}" for s in snippets
+    )
 
 
 def _agent_display_name() -> str:
@@ -207,6 +248,9 @@ def _send_llm_greeting(home_chat_id: str, agent_name: str) -> None:
 
     try:
         summary = _build_context_summary()
+        topic = _recent_topic()
+        if topic:
+            summary = f"{summary}\n\n{topic}"
         user_name = ""
         sessions = _load_sessions()
         for s in sessions.values():
@@ -219,8 +263,11 @@ def _send_llm_greeting(home_chat_id: str, agent_name: str) -> None:
         tz_name = os.environ.get("TELEGRAM_BOOT_TZ") or os.environ.get("TZ") or "Asia/Kolkata"
         local = _local_now(tz_name)
         prompt = (
-            f"You just came back online. Greet {greet_target} warmly, in your own voice, "
-            f"as {agent_name}. Reference any recent activity naturally if relevant.\n\n"
+            f"You just came back online. Greet {greet_target} in your own voice as "
+            f"{agent_name} — warm and personal, like picking up where you left off, not "
+            f"a templated status ping. If the context below gives you something real to "
+            f"reference (a topic you were on, their energy), weave it in naturally — "
+            f"never force it.\n\n"
             f"The user is in India. The current local time is "
             f"{local.strftime('%A %Y-%m-%d %H:%M')} IST ({tz_name}). Always reason about "
             f"and express times in India Standard Time (IST, UTC+5:30) — never UTC or any "
