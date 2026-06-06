@@ -1121,8 +1121,14 @@ fi
 # Private; no readiness gate.
 start_dashboard
 
-# Fatal on first boot; no gateway = useless container.
+# Launch gateway and WebUI concurrently — independent processes, so overlapping
+# their startup drops WebUI's serial wait off the critical path. Gateway is still
+# waited on first (fatal); WebUI is waited on after (non-fatal), by which point it
+# has had the gateway's startup window to come up.
 start_gateway
+start_webui
+
+# Fatal on first boot; no gateway = useless container.
 if ! wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
 	echo ""
 	echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
@@ -1141,7 +1147,6 @@ log "✓ Model configured: $MODEL_FOR_CONFIG"
 start_sync_loop
 
 # Non-fatal; router shows it as down.
-start_webui
 if wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
 	echo "Hermes WebUI is up."
 else
