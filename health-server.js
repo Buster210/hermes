@@ -14,6 +14,7 @@ const WEBUI_PORT = Number(process.env.HERMES_WEBUI_PORT || 8787);
 const GATEWAY_HOST = "127.0.0.1";
 const startTime = Date.now();
 const API_SERVER_KEY = process.env.API_SERVER_KEY || "";
+const WEBUI_HAS_PASSWORD = !!(process.env.HERMES_WEBUI_PASSWORD || "").trim(); // WebUI self-gates exec paths when its own auth is on, so defer for single-login; when off, router must gate (fail-closed) to preserve df307c7/09ab5f0.
 const HM_PREFIX = "/hm";
 
 const HMD_PREFIX = "/hmd";
@@ -399,6 +400,21 @@ function requireAuth(req, res) {
   const parsed = new URL(req.url, "http://localhost");
   redirect(res, loginUrl(`${parsed.pathname}${parsed.search}`));
   return false;
+}
+
+// WebUI exec/terminal surface — RCE-class, gated at the router before the
+// unauthenticated WebUI proxy fallback (HTTP and WebSocket upgrade).
+const WEBUI_EXEC_PATHS = new Set([
+  "/api/terminal/start",
+  "/api/terminal/input",
+  "/api/terminal/resize",
+  "/api/terminal/close",
+  "/api/terminal/output",
+  "/api/commands/exec",
+]);
+function isWebuiExecPath(path) {
+  const normalized = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  return WEBUI_EXEC_PATHS.has(normalized);
 }
 
 function proxyRequest(
@@ -1104,6 +1120,10 @@ const server = http.createServer(async (req, res) => {
     return res.end(renderPrivateRedirect(HF_SPACE_URL));
   }
 
+  if (isWebuiExecPath(path) && !WEBUI_HAS_PASSWORD) {
+    if (!requireAuth(req, res)) return;
+  }
+
   proxyRequest(req, res, WEBUI_PORT);
 });
 
@@ -1120,6 +1140,15 @@ server.listen(PORT, "0.0.0.0", () => {
 server.on("upgrade", (req, clientSocket, head) => {
   const parsed = new URL(req.url, "http://localhost");
   const path = parsed.pathname;
+
+  // Same router-level gate as the HTTP path: terminal/exec upgrades require
+  // auth. No res object here, so reject the socket directly.
+  if (isWebuiExecPath(path) && !WEBUI_HAS_PASSWORD && !isAuthorized(req)) {
+    try {
+      clientSocket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    } catch {}
+    return;
+  }
 
   let targetPort = WEBUI_PORT;
   let targetPath = req.url;
