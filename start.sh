@@ -128,10 +128,18 @@ if [ ! -L "${HOME}/.hermes/plugins" ]; then
 	ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
 fi
 
-# ── Restore state from HF Storage Bucket ──────────────────────────────
+# ── Restore state from HF Storage Bucket (async, gated) ───────────────
+# Restore runs in the background so the independent Cloudflare setup below
+# overlaps its download. A hard wait barrier (HERMES_RESTORE_PID, joined just
+# after the Cloudflare blocks) blocks every step that reads restored state —
+# the Telegram home seed, key sync, hermes update — and the gateway launches
+# ~1000 lines later, so the gateway is never even spawned, let alone serving,
+# on un-restored memory. Restore stays non-fatal (degrades to fresh state).
+HERMES_RESTORE_PID=""
 if [ -n "${HF_TOKEN:-}" ]; then
 	echo "Restoring Hermes state from HF bucket ${BACKUP_BUCKET}/${AGENT_NAME}"
-	python3 "$APP_DIR/hermes-sync.py" restore || true
+	python3 "$APP_DIR/hermes-sync.py" restore &
+	HERMES_RESTORE_PID=$!
 else
 	echo "HF_TOKEN not set - bucket persistence is disabled."
 fi
@@ -151,6 +159,15 @@ fi
 if [ -n "${CLOUDFLARE_WORKERS_TOKEN:-}" ]; then
 	echo "Preparing Cloudflare Keepalive worker"
 	python3 "$APP_DIR/cloudflare-keepalive-setup.py" || true
+fi
+
+# Gate: join the async HF restore before anything reads restored state. Every
+# step below (Telegram home seed, key sync, hermes update, gateway launch)
+# depends on the restored $HERMES_HOME, so block here until it completes.
+# Non-fatal, matching the original synchronous behavior.
+if [ -n "$HERMES_RESTORE_PID" ]; then
+	wait "$HERMES_RESTORE_PID" || true
+	echo "HF restore complete."
 fi
 
 # ── Telegram env normalisation (aliases + webhook URL + secret) ───────
@@ -995,7 +1012,9 @@ export HERMES_WEBUI_DEFAULT_WORKSPACE="${HERMES_WEBUI_DEFAULT_WORKSPACE:-$HERMES
 export HERMES_WEBUI_AUTO_INSTALL="0"
 mkdir -p "$HERMES_WEBUI_STATE_DIR"
 
-GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-120}"
+# Gateway opens its API port within ~8s of launch in boot tests; 90s keeps a
+# wide margin while failing a wedged gateway sooner. Override to raise.
+GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-90}"
 WEBUI_READY_TIMEOUT="${WEBUI_READY_TIMEOUT:-60}"
 
 # ── Initial boot ──────────────────────────────────────────────────────
