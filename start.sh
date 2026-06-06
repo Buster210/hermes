@@ -21,8 +21,9 @@ APP_DIR="${HERMES_APP_DIR:-/opt/hermes}"
 WEBUI_REPO="${HERMES_WEBUI_REPO:-/opt/hermes-webui}"
 HERMES_DATA_ROOT="${HERMES_HOME:-/opt/data}"
 
-# Per-agent state isolation (support multiple agents)
-AGENT_NAME="${AGENT_NAME:-primary}"
+# Per-agent state isolation (support multiple agents). Exported so hermes-sync.py
+# scopes both HERMES_HOME and its bucket prefix to this agent.
+export AGENT_NAME="${AGENT_NAME:-primary}"
 HERMES_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}/.hermes"
 WORKSPACE_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}/workspace"
 STARTUP_FILE="$WORKSPACE_HOME/startup.sh"
@@ -55,6 +56,9 @@ TELEGRAM_WEBHOOK_PORT="${TELEGRAM_WEBHOOK_PORT:-8765}"
 WEBUI_PORT="${HERMES_WEBUI_PORT:-8787}"
 
 SYNC_INTERVAL="${SYNC_INTERVAL:-60}"
+# Shared bucket; each agent backs up under its AGENT_NAME prefix. Exported for hermes-sync.py.
+export BACKUP_BUCKET_NAME="${BACKUP_BUCKET_NAME:-hermes-backup}"
+BACKUP_BUCKET="$BACKUP_BUCKET_NAME"
 BACKUP_DATASET="${BACKUP_DATASET_NAME:-hermes-backup}"
 CF_PROXY_ENV_FILE="/tmp/hermes-cloudflare-proxy.env"
 
@@ -124,12 +128,12 @@ if [ ! -L "${HOME}/.hermes/plugins" ]; then
 	ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
 fi
 
-# ── Restore state from HF Dataset ─────────────────────────────────────
+# ── Restore state from HF Storage Bucket ──────────────────────────────
 if [ -n "${HF_TOKEN:-}" ]; then
-	echo "Restoring Hermes state from HF Dataset"
+	echo "Restoring Hermes state from HF bucket ${BACKUP_BUCKET}/${AGENT_NAME}"
 	python3 "$APP_DIR/hermes-sync.py" restore || true
 else
-	echo "HF_TOKEN not set - dataset persistence is disabled."
+	echo "HF_TOKEN not set - bucket persistence is disabled."
 fi
 
 # ── Cloudflare proxy (optional) ──
@@ -883,7 +887,7 @@ else
 	log "Telegram   : not configured"
 fi
 [ -n "${HF_TOKEN:-}" ] &&
-	log "Backup     : enabled (${BACKUP_DATASET:-hermes-backup})" ||
+	log "Backup     : enabled (bucket ${BACKUP_BUCKET:-hermes-backup}/${AGENT_NAME})" ||
 	log "Backup     : disabled"
 [ -n "${CLOUDFLARE_PROXY_URL:-}" ] &&
 	log "CF Proxy   : ${CLOUDFLARE_PROXY_URL}"

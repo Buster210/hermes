@@ -23,7 +23,7 @@ Run your own AI agent with a chat interface on Hugging Face Spaces — for free.
 - **AI agent** — Powered by [Hermes Agent](https://github.com/NousResearch/hermes-agent): persistent memory, multi-provider LLM routing, cron jobs, skills
 - **OpenAI-compatible API** — Expose your agent at `/v1/*` from any OpenAI SDK client
 - **Telegram bridge** — Chat with Hermes from Telegram (works on private Spaces via Cloudflare proxy)
-- **Free persistence** — Chats, memory, settings, profiles all backed up to a private HF Dataset
+- **Free persistence** — Chats, memory, settings, profiles all backed up to a private HF Storage Bucket
 - **Single-token auth** — One `GATEWAY_TOKEN` for the UI and the API
 - **One-click deploy** — Duplicate the Space, add secrets, wait 5 minutes
 - **MCP support** — Plug in [Model Context Protocol](https://modelcontextprotocol.io/) servers for tools, filesystem, and more
@@ -157,14 +157,17 @@ For deeper troubleshooting (build failures, Telegram, Cloudflare, sync issues), 
 | `PRIMARY_UI` | Controls what `/` shows. Default `webui` (chat UI). Set to `dashboard` to swap in the HuggingMes status page. |
 | `SYNC_INTERVAL` | Backup cadence in seconds (default 600, range 60–86400) |
 | `HERMES_AGENT_VERSION` | Pin the upstream Hermes Agent base image to a specific tag for reproducibility (default `latest`) |
-| `BACKUP_DATASET_NAME` | Name of the private HF Dataset used for persistence (default `hermes-backup`) |
+| `BACKUP_BUCKET_NAME` | Name of the shared private HF Storage Bucket used for persistence (default `hermes-backup`). Each agent backs up under its own `AGENT_NAME` prefix |
+| `AGENT_NAME` | Per-agent state dir + bucket prefix, lowercased (default `primary`) |
+| `MIGRATE_FROM_DATASET` | One-time legacy dataset→bucket import when an agent's prefix is empty (default `true`) |
+| `BACKUP_DATASET_NAME` | Legacy HF Dataset name, used only as the one-time migration source (default `hermes-backup`) |
 
 ### Configure LLM Provider via Config Editor
 
 > ### ⚠️ Provider keys go in HF Space Secrets, not the dashboard's Env tab
 >
 > The Hermes dashboard exposes an "Env" editor that writes to `/opt/data/.env`
-> inside the container. **That file is *not* backed up to your HF Dataset.**
+> inside the container. **That file is *not* backed up to your HF bucket.**
 > On every Space sleep / rebuild the container's filesystem is wiped, the
 > `.env` is gone, and your `OLLAMA_API_KEY` / `OPENROUTER_API_KEY` /
 > `ANTHROPIC_API_KEY` / etc. disappear with it. The Space then 500s on the
@@ -249,11 +252,11 @@ mcp:
 
 When `HF_TOKEN` is set:
 
-*   **On boot**, the Space downloads the latest snapshot from your private HF Dataset and restores it into `/opt/data/`.
-*   **Every `SYNC_INTERVAL` seconds** (default 600), it detects state changes and uploads a new snapshot.
+*   **On boot**, the Space downloads this agent's prefix from your private HF Storage Bucket and restores it into `/opt/data/<AGENT_NAME>/.hermes`. If the prefix is empty, it does a one-time import from the legacy `BACKUP_DATASET_NAME` dataset (disable with `MIGRATE_FROM_DATASET=false`).
+*   **Every `SYNC_INTERVAL` seconds** (default 600), it detects state changes and syncs the prefix.
 *   **On graceful shutdown** (SIGTERM), it does one final sync before exit.
 
-What gets backed up: chat sessions, agent memory, workspace files, profiles, skills, cron jobs, Hermes config. The dataset is private to your HF account.
+What gets backed up: chat sessions, agent memory, workspace files, profiles, skills, cron jobs, Hermes config. The bucket is private to your HF account, and each agent is isolated under its own `AGENT_NAME` prefix.
 
 ### Architecture
 
@@ -273,7 +276,7 @@ HF Space port 7861
         └─► /health, /status   → in-process JSON
 ```
 
-`start.sh` boots Hermes Agent's gateway + dashboard + WebUI as subprocesses, then the router on top. `hermes-sync.py` runs the periodic HF Dataset upload loop. Cloudflare and Telegram setup runs once at boot if their respective secrets are set.
+`start.sh` boots Hermes Agent's gateway + dashboard + WebUI as subprocesses, then the router on top. `hermes-sync.py` runs the periodic HF Storage Bucket sync loop. Cloudflare and Telegram setup runs once at boot if their respective secrets are set.
 
 ### Telegram on HF Spaces (webhook vs polling)
 
@@ -351,7 +354,7 @@ docker run --rm -p 7861:7861 --env-file .env hermes
 | Telegram `InvalidToken` error (token is actually correct) | A stale proxy URL was used after the previous Worker was deleted. `start.sh` now re-syncs `telegram.extra.base_url` to the current worker each boot — restart to pick it up |
 | Telegram/proxy fails with Cloudflare "error code: 1010" | Cloudflare's bot firewall 403s the default `Python-urllib` User-Agent; calls through the proxy must send a browser UA (`Mozilla/5.0`) — handled in `start.sh`/`cloudflare-proxy-setup.py` |
 | `getUpdates Conflict: can't use getUpdates while webhook is active` | A webhook was left registered before switching to polling. The polling-mode boot calls `deleteWebhook` to clear it; restart in polling mode |
-| Two Spaces overwriting each other's backup | Set different `BACKUP_DATASET_NAME` on each |
+| Two Spaces overwriting each other's backup | Give each a distinct `AGENT_NAME` (its own bucket prefix), or a different `BACKUP_BUCKET_NAME` |
 | Agent responds but cannot answer questions | No LLM provider configured. Add provider API keys and restart, or configure via `/hm/app/config` |
 
 ## Credits

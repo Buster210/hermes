@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && (apt-get install -y --no-install-recommends libasound2 2>/dev/null || apt-get install -y --no-install-recommends libasound2t64 2>/dev/null || true) \
     && rm -rf /var/lib/apt/lists/* \
     && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
-        huggingface_hub hf_transfer pyyaml
+        "huggingface_hub>=1.18.0" hf_transfer pyyaml
 
 # Clone WebUI; install deps using system pip (base image venv may not exist yet)
 RUN git clone --depth 1 --branch ${WEBUI_REF} \
