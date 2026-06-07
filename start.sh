@@ -170,6 +170,72 @@ if [ -n "$HERMES_RESTORE_PID" ]; then
 	echo "HF restore complete."
 fi
 
+# ── Memory-OS: seed consolidation skill + cron job (additive, idempotent) ──
+# Tiered self-managing memory (SPEC-B Phase 1). Working tier = state.db +
+# capped MEMORY.md/USER.md (prompt-injected); long-term tier = memories/longterm/*
+# (durable, uncapped). A scheduled agent distills sessions into durable memory and
+# keeps the capped files current. Mirrors the hooks-seed pattern (line ~99); runs
+# post-restore so it never clobbers restored memory or user-created cron jobs.
+if [ -d "$APP_DIR/skills" ]; then
+	cp -a "$APP_DIR/skills/." "$HERMES_HOME/skills/"
+	echo "Assistant skills seeded to $HERMES_HOME/skills/."
+fi
+mkdir -p "$HERMES_HOME/memories/longterm" "$HERMES_HOME/memories/.backups"
+# One-time safety snapshot of any pre-existing memory before the consolidator
+# ever runs (belt-and-suspenders; the skill also backs up per run).
+if [ ! -f "$HERMES_HOME/memories/.backups/initial-seed.done" ]; then
+	for mf in MEMORY.md USER.md; do
+		[ -f "$HERMES_HOME/memories/$mf" ] && cp -a "$HERMES_HOME/memories/$mf" "$HERMES_HOME/memories/.backups/$mf.initial" || true
+	done
+	touch "$HERMES_HOME/memories/.backups/initial-seed.done"
+fi
+# Register the consolidation cron job once (additive; never clobber user jobs).
+HERMES_BIN="/opt/hermes/.venv/bin/hermes"
+if [ -x "$HERMES_BIN" ]; then
+	# Capture separately: under `set -o pipefail` a non-zero `cron list`
+	# (slow-starting daemon) would mask a match and re-create a duplicate job.
+	cron_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
+	if printf '%s\n' "$cron_jobs" | grep -q "memory-os-consolidation"; then
+		echo "memory-os cron job already present."
+	elif "$HERMES_BIN" cron create "every 360m" \
+		"Run the memory-os consolidation pass now. Load and follow the memory-os skill end to end: back up memory, read new sessions from state.db since the watermark, distill durable facts, append them to the long-term archive, then refresh MEMORY.md and USER.md within their char caps. Additive and lossless; never delete existing memory; never store secrets or PII." \
+		--name "memory-os-consolidation" \
+		--deliver local \
+		--skill memory-os >/dev/null 2>&1; then
+		echo "memory-os cron job registered (every 360m)."
+	else
+		echo "memory-os cron registration skipped (non-fatal)."
+	fi
+fi
+
+# ── Taste capture: seed preferences hook + skill + cron job (additive) ──
+# SPEC-B Phase 2. The taste-capture hook (session:end) queues correction/redo/
+# rejection signals into memories/longterm/TASTE-signals.md; the taste-capture
+# skill (cron) distills them into a confidence-gated preferences profile
+# (memories/longterm/TASTE-ledger.md, durable) and refreshes a marked block in
+# USER.md so the agent shapes output to Ritesh's taste. Hook + skill are seeded
+# by the blocks above (cp -a hooks/. and skills/.); here we init files + cron.
+# Cadence 730m (~12h) is deliberately offset from memory-os's 360m: both cron
+# agents do full-file writes to USER.md with no lock, so a coincident-minute run
+# could clobber. Different first-fire offsets keep them apart (lcm ≈ 18 days).
+for tf in TASTE-ledger.md TASTE-signals.md; do
+	[ -f "$HERMES_HOME/memories/longterm/$tf" ] || : >"$HERMES_HOME/memories/longterm/$tf"
+done
+if [ -x "$HERMES_BIN" ]; then
+	taste_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
+	if printf '%s\n' "$taste_jobs" | grep -q "taste-capture"; then
+		echo "taste-capture cron job already present."
+	elif "$HERMES_BIN" cron create "every 730m" \
+		"Run the taste-capture consolidation pass now. Load and follow the taste-capture skill end to end: read the queued correction signals (fall back to recent sessions if empty), distill durable confidence-gated preferences, append them with provenance to the long-term taste ledger, then refresh only the marked taste block in USER.md within its char cap. Additive and lossless; preserve all non-taste memory; never store secrets or PII; shape output, never erase personality." \
+		--name "taste-capture" \
+		--deliver local \
+		--skill taste-capture >/dev/null 2>&1; then
+		echo "taste-capture cron job registered (every 730m)."
+	else
+		echo "taste-capture cron registration skipped (non-fatal)."
+	fi
+fi
+
 # ── Telegram env normalisation (aliases + webhook URL + secret) ───────
 if [ -n "${TELEGRAM_USER_IDS:-}" ] && [ -z "${TELEGRAM_ALLOWED_USERS:-}" ]; then
 	export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_IDS"

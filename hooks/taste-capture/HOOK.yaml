@@ -1,0 +1,4 @@
+name: taste-capture
+description: Queue correction, redo, and rejection signals from recent sessions for the taste-capture skill to distill into a preferences profile.
+events:
+  - session:end
