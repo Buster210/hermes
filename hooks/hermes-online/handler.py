@@ -4,63 +4,38 @@ Step A: deterministic Telegram ping (no LLM, survives model outages).
 Step B: background AIAgent with SOUL + memory + session context.
 """
 
-import json
+import importlib.util as _ilu
 import logging
 import os
-import sqlite3
 import threading
-import urllib.request
 from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger("hooks.hermes-online")
 
 
-def _local_now(tz_name: str) -> datetime:
-    """Resolve current local time for tz_name without requiring system tzdata.
+def _load_utils():
+    import sys
+    path = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_utils.py")
+    )
+    key = "_hermes_hook_utils"
+    if key in sys.modules:
+        return sys.modules[key]
+    spec = _ilu.spec_from_file_location(key, path)
+    mod = _ilu.module_from_spec(spec)
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
-    Tries zoneinfo first (full DST support when tzdata is present), then falls
-    back to a fixed-offset table for common DST-free zones, then to a literal
-    UTC±HH:MM / ±HHMM string. Returns UTC if nothing resolves.
-    """
-    now_utc = datetime.now(timezone.utc)
-    if not tz_name:
-        return now_utc
-    try:
-        from zoneinfo import ZoneInfo
 
-        return now_utc.astimezone(ZoneInfo(tz_name))
-    except Exception as exc:
-        log.warning("zoneinfo %r unavailable (%s); trying fixed offset", tz_name, exc)
-
-    fixed = {
-        "asia/kolkata": (5, 30), "asia/calcutta": (5, 30),
-        "ist": (5, 30), "utc": (0, 0), "gmt": (0, 0),
-    }
-    key = tz_name.strip().lower()
-    if key in fixed:
-        h, m = fixed[key]
-        return now_utc.astimezone(timezone(timedelta(hours=h, minutes=m)))
-
-    s = key.replace("utc", "").replace("gmt", "").strip()
-    if s and s[0] in "+-":
-        sign = 1 if s[0] == "+" else -1
-        body = s[1:]
-        try:
-            if ":" in body:
-                hh, mm = body.split(":", 1)
-                h, m = int(hh), int(mm)
-            else:
-                h = int(body[:2]); m = int(body[2:4]) if len(body) > 2 else 0
-            return now_utc.astimezone(timezone(sign * timedelta(hours=h, minutes=m)))
-        except Exception:
-            pass
-
-    log.warning("boot tz %r unresolved; using UTC", tz_name)
-    return now_utc
-
-_HERMES_HOME = os.environ.get("HERMES_HOME", "/opt/data")
-_SESSIONS_FILE = os.path.join(_HERMES_HOME, "sessions", "sessions.json")
-_STATE_DB = os.path.join(_HERMES_HOME, "state.db")
+_u = _load_utils()
+_local_now = _u._local_now
+_agent_display_name = _u._agent_display_name
+_send_telegram = _u._send_telegram
+_load_sessions = _u._load_sessions
+_recent_topic = _u._recent_topic
+_message_count = _u._message_count
+del _ilu, _u, _load_utils
 
 _BOOT_SENTINEL = os.path.join(
     "/tmp", f"hermes-online.greeted.{os.environ.get('AGENT_NAME', 'primary')}"
@@ -80,107 +55,6 @@ def _claim_boot_once() -> bool:
     except Exception as exc:
         log.warning("boot once-guard unavailable (%s); proceeding", exc)
         return True
-
-_TS_COL_CANDIDATES = ("created_at", "timestamp", "ts", "time", "created")
-_CONTENT_COL_CANDIDATES = ("content", "text", "message", "body", "data")
-
-
-def _recent_topic(limit: int = 4, max_len: int = 160) -> str:
-    """Best-effort gist of the most recent messages, for a warmer greeting that
-    can reference what we were last on. Empty on any issue so the greeting cleanly
-    falls back to the session-count context. Recipient is the user's own chat."""
-    if not os.path.exists(_STATE_DB):
-        return ""
-    try:
-        conn = sqlite3.connect(_STATE_DB, timeout=5)
-        try:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-            ts_col = next((c for c in _TS_COL_CANDIDATES if c in cols), None)
-            content_col = next((c for c in _CONTENT_COL_CANDIDATES if c in cols), None)
-            if ts_col is None or content_col is None:
-                return ""
-            role_filter = "WHERE role IN ('user', 'assistant') " if "role" in cols else ""
-            rows = conn.execute(
-                f"SELECT {content_col} FROM messages {role_filter}"
-                f"ORDER BY {ts_col} DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        finally:
-            conn.close()
-    except Exception:
-        return ""
-    snippets = []
-    for (val,) in reversed(rows):
-        text = " ".join(str(val or "").split())
-        if not text:
-            continue
-        if len(text) > max_len:
-            text = text[:max_len] + "…"
-        snippets.append(text)
-    if not snippets:
-        return ""
-    return "Recent thread (for context — reference the gist, don't quote verbatim):\n" + "\n".join(
-        f"- {s}" for s in snippets
-    )
-
-
-def _agent_display_name() -> str:
-    """Friendly agent name. AGENT_NAME defaults to the state-isolation key
-    'primary' (start.sh), which is not a display name — fall back to Hermes."""
-    explicit = os.environ.get("HERMES_AGENT_DISPLAY_NAME", "").strip()
-    if explicit:
-        return explicit
-    name = os.environ.get("AGENT_NAME", "").strip()
-    return name if name and name != "primary" else "Hermes"
-
-
-def _send_telegram(text: str, chat_id: str) -> None:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    if not token or not chat_id:
-        return
-    base = os.environ.get("TELEGRAM_BASE_URL", "https://api.telegram.org/bot")
-    payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
-    req = urllib.request.Request(
-        f"{base}{token}/sendMessage",
-        data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        if not data.get("ok"):
-            log.warning("sendMessage failed: %s", data.get("description"))
-    except Exception as exc:
-        log.warning("sendMessage error: %s", exc)
-
-
-def _load_sessions() -> dict:
-    try:
-        with open(_SESSIONS_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _message_count(session_id: str, since: datetime) -> int:
-    if not session_id or not os.path.exists(_STATE_DB):
-        return 0
-    try:
-        conn = sqlite3.connect(_STATE_DB, timeout=5)
-        try:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-            ts_col = next((c for c in _TS_COL_CANDIDATES if c in cols), None)
-            if "session_id" not in cols or ts_col is None:
-                return 0
-            row = conn.execute(
-                f"SELECT COUNT(*) FROM messages WHERE session_id = ? AND {ts_col} >= ?",
-                (session_id, since.isoformat()),
-            ).fetchone()
-            return row[0] if row else 0
-        finally:
-            conn.close()
-    except Exception:
-        return 0
 
 
 def _build_context_summary() -> str:
@@ -250,7 +124,7 @@ def _send_llm_greeting(home_chat_id: str, agent_name: str) -> None:
 
         greet_target = user_name or "there"
         tz_name = os.environ.get("TELEGRAM_BOOT_TZ") or os.environ.get("TZ") or "Asia/Kolkata"
-        local = _local_now(tz_name)
+        local = _local_now(tz_name, log=log)
         prompt = (
             f"You just came back online. Greet {greet_target} in your own voice as "
             f"{agent_name} — warm and personal, like picking up where you left off, not "
@@ -296,11 +170,11 @@ async def handle(event_type: str, context: dict) -> None:
 
         agent_name = _agent_display_name()
         tz_name = os.environ.get("TELEGRAM_BOOT_TZ") or os.environ.get("TZ") or "Asia/Kolkata"
-        local = _local_now(tz_name)
+        local = _local_now(tz_name, log=log)
 
         greeting = "Good morning" if local.hour < 12 else ("Good afternoon" if local.hour < 18 else "Good evening")
         alive_msg = f"✅ {agent_name} online — {greeting} {local.strftime('%Y-%m-%d %H:%M')}"
-        _send_telegram(alive_msg, home_chat_id)
+        _send_telegram(alive_msg, home_chat_id, log=log)
 
         thread = threading.Thread(
             target=_send_llm_greeting,

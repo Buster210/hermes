@@ -686,30 +686,6 @@ fi
 # ── Optional boot-time package installs (HF Variables/Secrets) ────────────────
 HM_STARTUP_FAILURES=0
 
-install_apt_packages() {
-	local raw="$1"
-	[ -n "$raw" ] || return 0
-	echo "Installing apt packages from HERMES_APT_PACKAGES..."
-	local -a pkgs; read -r -a pkgs <<<"$raw"
-	if command -v sudo >/dev/null 2>&1; then
-		if sudo apt-get update && sudo apt-get install -y "${pkgs[@]}"; then
-			echo "HERMES_APT_PACKAGES install complete."
-		else
-			HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
-			echo "ERROR: HERMES_APT_PACKAGES install failed: $raw" >&2
-		fi
-	elif [ "$(id -u)" -eq 0 ]; then
-		if apt-get update && apt-get install -y "${pkgs[@]}"; then
-			echo "HERMES_APT_PACKAGES install complete."
-		else
-			HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
-			echo "ERROR: HERMES_APT_PACKAGES install failed: $raw" >&2
-		fi
-	else
-		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
-		echo "ERROR: root/sudo unavailable; HERMES_APT_PACKAGES skipped" >&2
-	fi
-}
 
 install_pip_packages() {
 	local raw="$1"
@@ -737,7 +713,6 @@ install_npm_packages() {
 	fi
 }
 
-install_apt_packages "${HERMES_APT_PACKAGES:-}"
 install_pip_packages "${HERMES_PIP_PACKAGES:-}"
 install_npm_packages "${HERMES_NPM_PACKAGES:-}"
 
