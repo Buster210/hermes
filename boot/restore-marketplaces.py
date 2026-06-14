@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""Read known_marketplaces.json and print URLs of missing marketplace clones.
-
-Args: argv[1] = path to known_marketplaces.json
-      argv[2] = path to marketplaces directory
-"""
 import json
 import os
 import sys

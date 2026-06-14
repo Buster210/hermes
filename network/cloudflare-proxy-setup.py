@@ -38,6 +38,12 @@ DEFAULT_ALLOWED = [
 
 
 def cf_request(method: str, path: str, token: str, body: bytes | None = None, content_type: str = "application/json"):
+    req = urllib.request.Request(
+        f"{API_BASE}{path}",
+        data=body,
+        method=method,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": content_type},
+    )
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
             payload = json.loads(response.read().decode("utf-8"))

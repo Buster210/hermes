@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""Check if this is a re-run (first_run_done in keys-state.json).
-
-Exit 0 = re-run detected (first run done).
-Exit 1 = first run (or state unreadable).
-"""
 import json, os, sys
 from pathlib import Path
 

@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Inject Telegram platform config into Hermes config.yaml.
-
-Env: HERMES_HOME             — state directory containing config.yaml.
-     TELEGRAM_BASE_URL       — proxy base URL (overwritten every boot).
-     TELEGRAM_BASE_FILE_URL  — proxy file URL (falls back to BASE_URL).
-     TELEGRAM_ALLOWED_USERS  — comma-separated user IDs for allow_from.
-"""
 import os
 from pathlib import Path
 

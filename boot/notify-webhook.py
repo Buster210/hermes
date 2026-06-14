@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""POST a restart notification to the configured webhook URL.
-
-Env: WEBHOOK_URL        — URL to POST to.
-     MODEL_FOR_CONFIG   — model name to include in the payload.
-"""
 import json
 import os
 import urllib.request

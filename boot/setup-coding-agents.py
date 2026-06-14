@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""Seed Claude Code + opencode config for headless operation.
-
-Env: CODING_HOME — home directory to seed into.
-     OC_MODEL    — opencode model override (default: opencode/mimo-v2.5-free).
-"""
 import json
 import os
 import pathlib

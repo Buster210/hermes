@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""Clear a registered Telegram webhook so getUpdates can take over.
-
-Env: TELEGRAM_API_BASE — e.g. "https://api.telegram.org/bot" or proxy base.
-     TELEGRAM_BOT_TOKEN — bot token from @BotFather.
-"""
 import json
 import os
 import urllib.request
