@@ -156,7 +156,6 @@ For deeper troubleshooting (build failures, Telegram, Cloudflare, sync issues), 
 | `TELEGRAM_BOOT_TZ` | Optional timezone (e.g. `Asia/Kolkata`) for the boot greeting's time-of-day; falls back to `TZ`, then server time |
 | `PRIMARY_UI` | Controls what `/` shows. Default `webui` (chat UI). Set to `dashboard` to swap in the HuggingMes status page. |
 | `SYNC_INTERVAL` | Backup cadence in seconds (default 600, range 60–86400) |
-| `HERMES_AGENT_VERSION` | Pin the upstream Hermes Agent base image to a specific tag for reproducibility (default `latest`) |
 | `BACKUP_BUCKET_NAME` | Name of the shared private HF Storage Bucket used for persistence (default `hermes-backup`). Each agent backs up under its own `AGENT_NAME` prefix |
 | `AGENT_NAME` | Per-agent state dir + bucket prefix, lowercased (default `primary`) |
 | `MIGRATE_FROM_DATASET` | One-time legacy dataset→bucket import when an agent's prefix is empty (default `true`) |
@@ -343,7 +342,7 @@ docker run --rm -p 7861:7861 --env-file .env hermes
 
 | Symptom | Cause / Fix |
 |--------|-------------|
-| Build fails on `nousresearch/hermes-agent:latest` | Set `HERMES_AGENT_VERSION` to a specific tag and restart |
+| Build fails on `nousresearch/hermes-agent` base image | Edit the `HERMES_AGENT_REF` digest in the Dockerfile to a known-good tag/digest and rebuild |
 | Container Running but `/` returns 502 | Hermes WebUI didn't bind. Check Logs tab for `webui.log` output — usually missing/wrong provider API key or LLM config |
 | `/v1/*` returns 401 | Need `Authorization: Bearer <GATEWAY_TOKEN>` header |
 | `/api/status` 404s in logs | Cosmetic — old browser tab polling. Ignored. |

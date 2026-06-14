@@ -4,8 +4,7 @@ services:
     build:
       context: .
       args:
-        HERMES_AGENT_VERSION: ${HERMES_AGENT_VERSION:-latest}
-        WEBUI_REF: ${WEBUI_REF:-v0.51.252}
+        WEBUI_REF: ${WEBUI_REF:-v0.51.410}
     image: hermes-webui:local
     ports:
       - "7861:7861"

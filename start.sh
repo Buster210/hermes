@@ -685,44 +685,6 @@ if [ -n "${WEBHOOK_URL:-}" ]; then
 	"$APP_DIR/boot/notify-webhook.py" >/dev/null 2>&1 &
 fi
 
-# ── Boot script (HERMES_RUN) ────────────────────────────────────────────────
-
-hm_run_startup() {
-	local payload="$1"
-	[ -n "$payload" ] || return 0
-	local script_file
-	script_file=$(mktemp "/tmp/hermes-startup.XXXXXX.sh")
-	{
-		echo 'export HERMES_CAPTURE_DISABLE=1'
-		echo '[ -f ~/.bashrc ] && . ~/.bashrc'
-		if [[ "$payload" == base64:* ]] || [[ "$payload" == b64:* ]]; then
-			printf '%s' "${payload#*:}" | base64 -d
-		else
-			printf '%s\n' "$payload"
-		fi
-	} > "$script_file"
-	chmod 700 "$script_file"
-	echo "[startup:HERMES_RUN] running script"
-	set +e
-	bash "$script_file"
-	local rc=$?
-	set -e
-	rm -f "$script_file"
-	if [ "$rc" -eq 0 ]; then
-		echo "[startup:HERMES_RUN] ok"
-	else
-		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
-		echo "ERROR: HERMES_RUN script failed (exit ${rc})" >&2
-	fi
-}
-
-if [ -n "${HERMES_RUN:-}" ]; then
-	hm_run_startup "$HERMES_RUN"
-fi
-
-if [ "$HM_STARTUP_FAILURES" -gt 0 ]; then
-	echo "Warning: ${HM_STARTUP_FAILURES} startup step(s) failed. Check logs above." >&2
-fi
 
 # ── Run workspace startup script ──
 if [ -s "$STARTUP_FILE" ]; then
