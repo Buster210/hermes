@@ -24,6 +24,10 @@ SINGULAR_PROVIDERS = {
     "DASHSCOPE_API_KEY": "alibaba",
     "GMI_API_KEY": "gmi",
     "TOKENHUB_API_KEY": "tencent-tokenhub",
+    "GROQ_API_KEY": "groq",
+    "GOOGLE_API_KEY": "google",
+    "OPENCODE_API_KEY": "opencode",
+    "CLAUDE_CODE_OAUTH_TOKEN": "claude-code",
     "HF_TOKEN": "huggingface",
     "AI_GATEWAY_API_KEY": "ai-gateway",
     "CUSTOM_API_KEY": "custom",
@@ -44,7 +48,11 @@ POOL_VARS = {
     "ARCEEAI_API_KEYS":    "ARCEEAI_API_KEY",
     "DASHSCOPE_API_KEYS":  "DASHSCOPE_API_KEY",
     "GMI_API_KEYS":        "GMI_API_KEY",
-    "TOKENHUB_API_KEYS":   "TOKENHUB_API_KEY",
+    "TOKENHUB_API_KEYS":        "TOKENHUB_API_KEY",
+    "GROQ_API_KEYS":            "GROQ_API_KEY",
+    "GOOGLE_API_KEYS":          "GOOGLE_API_KEY",
+    "OPENCODE_API_KEYS":        "OPENCODE_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKENS": "CLAUDE_CODE_OAUTH_TOKEN",
 }
 
 HERMES_HOME = Path(os.environ["HERMES_HOME"])

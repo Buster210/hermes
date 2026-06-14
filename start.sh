@@ -324,6 +324,8 @@ alibaba|alibaba-coding-plan|alibaba_coding:DASHSCOPE_API_KEY \
 tencent-tokenhub|tencent|tokenhub|tencentmaas:TOKENHUB_API_KEY \
 nvidia:NVIDIA_API_KEY \
 xai|grok:XAI_API_KEY \
+groq|groq-cloud:GROQ_API_KEY \
+opencode:OPENCODE_API_KEY \
 kilocode:KILOCODE_API_KEY \
 opencode-zen:OPENCODE_ZEN_API_KEY \
 opencode-go:OPENCODE_GO_API_KEY \
@@ -392,15 +394,15 @@ promote_first_pool_key() {
 	local pool_val="${!pool_var:-}"
 	[ -n "$singular_val" ] && return 0
 	[ -n "$pool_val" ] || return 0
-	local first
-	first=$(printf '%s' "$pool_val" \
+	local last
+	last=$(printf '%s' "$pool_val" \
 		| sed -e 's/^[[:space:]]*\[//' -e 's/\][[:space:]]*$//' \
 		| tr ',' '\n' \
 		| sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-		| awk 'NF{print; exit}' \
+		| awk 'NF{last=$0} END{if(last!="") print last}' \
 		| sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")
-	[ -n "$first" ] || return 0
-	export "${singular_var}=$first"
+	[ -n "$last" ] || return 0
+	export "${singular_var}=$last"
 }
 
 for _pk_pair in \
@@ -408,8 +410,8 @@ for _pk_pair in \
 	"GOOGLE:GOOGLE" "DEEPSEEK:DEEPSEEK" "KIMI:KIMI" \
 	"MINIMAX:MINIMAX" "NVIDIA:NVIDIA" "XAI:XAI" \
 	"KILOCODE:KILOCODE" "GLM:GLM" "ARCEEAI:ARCEEAI" \
-	"DASHSCOPE:DASHSCOPE" "GMI:GMI" "TOKENHUB:TOKENHUB" \
-	"OLLAMA:OLLAMA" \
+	"DASHSCOPE:DASHSCOPE" "GMI:GMI" "GROQ:GROQ" \
+	"TOKENHUB:TOKENHUB" "OLLAMA:OLLAMA" "OPENCODE:OPENCODE" \
 	"CLAUDE_CODE_OAUTH_TOKEN:CLAUDE_CODE_OAUTH_TOKEN"; do
 	_pk_s="${_pk_pair%%:*}_API_KEY"; _pk_p="${_pk_pair##*:}_API_KEYS"
 	[ "$_pk_pair" = "CLAUDE_CODE_OAUTH_TOKEN:CLAUDE_CODE_OAUTH_TOKEN" ] && _pk_p="CLAUDE_CODE_OAUTH_TOKENS"
@@ -683,38 +685,7 @@ if [ -n "${WEBHOOK_URL:-}" ]; then
 	"$APP_DIR/boot/notify-webhook.py" >/dev/null 2>&1 &
 fi
 
-# ── Optional boot-time package installs (HF Variables/Secrets) ────────────────
-HM_STARTUP_FAILURES=0
-
-
-install_pip_packages() {
-	local raw="$1"
-	[ -n "$raw" ] || return 0
-	echo "Installing Python packages from HERMES_PIP_PACKAGES..."
-	local -a pkgs; read -r -a pkgs <<<"$raw"
-	if /opt/hermes/.venv/bin/pip install "${pkgs[@]}"; then
-		echo "HERMES_PIP_PACKAGES install complete."
-	else
-		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
-		echo "ERROR: HERMES_PIP_PACKAGES install failed: $raw" >&2
-	fi
-}
-
-install_npm_packages() {
-	local raw="$1"
-	[ -n "$raw" ] || return 0
-	echo "Installing npm packages from HERMES_NPM_PACKAGES..."
-	local -a pkgs; read -r -a pkgs <<<"$raw"
-	if npm install -g "${pkgs[@]}"; then
-		echo "HERMES_NPM_PACKAGES install complete."
-	else
-		HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
-		echo "ERROR: HERMES_NPM_PACKAGES install failed: $raw" >&2
-	fi
-}
-
-install_pip_packages "${HERMES_PIP_PACKAGES:-}"
-install_npm_packages "${HERMES_NPM_PACKAGES:-}"
+# ── Boot script (HERMES_RUN) ────────────────────────────────────────────────
 
 hm_run_startup() {
 	local payload="$1"
