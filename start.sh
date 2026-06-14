@@ -134,6 +134,29 @@ if [ ! -L "${HOME}/.hermes/plugins" ] && ! [ "${HOME}/.hermes" -ef "$HERMES_HOME
 	ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
 fi
 
+# ── Shell capture wrappers (no restore dep — runs before restore) ─────────────
+if [ ! -f "$STARTUP_FILE" ]; then
+	mkdir -p "$WORKSPACE_HOME"
+	touch "$STARTUP_FILE"
+	chmod +x "$STARTUP_FILE"
+	echo "Created workspace/startup.sh"
+fi
+cp "$APP_DIR/shell/bashrc-capture.sh" "$HOME/.bashrc"
+printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.bashrc"
+cat > "$HOME/.profile" << 'PROFILE'
+[ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc
+PROFILE
+echo "Shell capture wrappers ready."
+
+# ── zsh interactive config (no restore dep — runs before restore) ──────────
+{
+	printf 'HISTFILE=%q\n' "$HERMES_HOME/.zsh_history"
+	printf 'HERMES_PERSONAL_ZSHRC=%q\n' "$HERMES_HOME/zshrc"
+} > "$HOME/.zshrc"
+cat "$APP_DIR/shell/zshrc-capture.zsh" >> "$HOME/.zshrc"
+printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.zshrc"
+echo "zsh interactive config ready ($HOME/.zshrc)."
+
 # ── Restore state from HF Storage Bucket (async, gated) ───────────────
 HERMES_RESTORE_PID=""
 if [ -n "${HF_TOKEN:-}" ]; then
@@ -186,38 +209,45 @@ if [ ! -f "$HERMES_HOME/memories/.backups/initial-seed.done" ]; then
 	touch "$HERMES_HOME/memories/.backups/initial-seed.done"
 fi
 HERMES_BIN="/opt/hermes/.venv/bin/hermes"
-if [ -x "$HERMES_BIN" ]; then
-	cron_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
-	if printf '%s\n' "$cron_jobs" | grep -q "memory-os-consolidation"; then
-		echo "memory-os cron job already present."
-	elif "$HERMES_BIN" cron create "every 360m" \
-		"Run the memory-os consolidation pass now. Load and follow the memory-os skill end to end: back up memory, read new sessions from state.db since the watermark, distill durable facts, append them to the long-term archive, then refresh MEMORY.md and USER.md within their char caps. Additive and lossless; never delete existing memory; never store secrets or PII." \
-		--name "memory-os-consolidation" \
-		--deliver local \
-		--skill memory-os >/dev/null 2>&1; then
-		echo "memory-os cron job registered (every 360m)."
-	else
-		echo "memory-os cron registration skipped (non-fatal)."
-	fi
-fi
 
-# ── Taste capture: seed preferences hook + skill + cron job (additive) ──
+# ── Taste capture: seed preference files before cron block ───────────────────
 for tf in TASTE-ledger.md TASTE-signals.md; do
 	[ -f "$HERMES_HOME/memories/longterm/$tf" ] || : >"$HERMES_HOME/memories/longterm/$tf"
 done
+
+# ── Cron registrations: memory-os + taste-capture in parallel ────────────────
 if [ -x "$HERMES_BIN" ]; then
-	taste_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
-	if printf '%s\n' "$taste_jobs" | grep -q "taste-capture"; then
-		echo "taste-capture cron job already present."
-	elif "$HERMES_BIN" cron create "every 730m" \
-		"Run the taste-capture consolidation pass now. Load and follow the taste-capture skill end to end: read the queued correction signals (fall back to recent sessions if empty), distill durable confidence-gated preferences, append them with provenance to the long-term taste ledger, then refresh only the marked taste block in USER.md within its char cap. Additive and lossless; preserve all non-taste memory; never store secrets or PII; shape output, never erase personality." \
-		--name "taste-capture" \
-		--deliver local \
-		--skill taste-capture >/dev/null 2>&1; then
-		echo "taste-capture cron job registered (every 730m)."
-	else
-		echo "taste-capture cron registration skipped (non-fatal)."
-	fi
+	(
+		cron_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
+		if printf '%s\n' "$cron_jobs" | grep -q "memory-os-consolidation"; then
+			echo "memory-os cron job already present."
+		elif "$HERMES_BIN" cron create "every 360m" \
+			"Run the memory-os consolidation pass now. Load and follow the memory-os skill end to end: back up memory, read new sessions from state.db since the watermark, distill durable facts, append them to the long-term archive, then refresh MEMORY.md and USER.md within their char caps. Additive and lossless; never delete existing memory; never store secrets or PII." \
+			--name "memory-os-consolidation" \
+			--deliver local \
+			--skill memory-os >/dev/null 2>&1; then
+			echo "memory-os cron job registered (every 360m)."
+		else
+			echo "memory-os cron registration skipped (non-fatal)."
+		fi
+	) &
+	CRON_MEM_PID=$!
+	(
+		taste_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
+		if printf '%s\n' "$taste_jobs" | grep -q "taste-capture"; then
+			echo "taste-capture cron job already present."
+		elif "$HERMES_BIN" cron create "every 730m" \
+			"Run the taste-capture consolidation pass now. Load and follow the taste-capture skill end to end: read the queued correction signals (fall back to recent sessions if empty), distill durable confidence-gated preferences, append them with provenance to the long-term taste ledger, then refresh only the marked taste block in USER.md within its char cap. Additive and lossless; preserve all non-taste memory; never store secrets or PII; shape output, never erase personality." \
+			--name "taste-capture" \
+			--deliver local \
+			--skill taste-capture >/dev/null 2>&1; then
+			echo "taste-capture cron job registered (every 730m)."
+		else
+			echo "taste-capture cron registration skipped (non-fatal)."
+		fi
+	) &
+	CRON_TASTE_PID=$!
+	wait "$CRON_MEM_PID" "$CRON_TASTE_PID" || true
 fi
 
 # ── Telegram env normalisation (aliases + webhook URL + secret) ───────
@@ -359,32 +389,10 @@ if [ -n "${CLOUDFLARE_PROXY_URL:-}" ] && [ -z "$TELEGRAM_BASE_URL" ]; then
 	export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
 fi
 
-# ── Shell capture wrappers ─────────────────────────────────────────────────
-if [ ! -f "$STARTUP_FILE" ]; then
-	mkdir -p "$WORKSPACE_HOME"
-	touch "$STARTUP_FILE"
-	chmod +x "$STARTUP_FILE"
-	echo "Created workspace/startup.sh"
-fi
-cp "$APP_DIR/shell/bashrc-capture.sh" "$HOME/.bashrc"
-printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.bashrc"
-cat > "$HOME/.profile" << 'PROFILE'
-[ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc
-PROFILE
-echo "Shell capture wrappers ready."
-
-# ── zsh interactive config (oh-my-zsh + powerlevel10k + private dotfiles) ──────
+# ── p10k theme (needs restored state — runs after restore wait) ───────────────
 if [ -f "$HERMES_HOME/p10k.zsh" ]; then
 	cp -f "$HERMES_HOME/p10k.zsh" "$HOME/.p10k.zsh"
 fi
-
-{
-	printf 'HISTFILE=%q\n' "$HERMES_HOME/.zsh_history"
-	printf 'HERMES_PERSONAL_ZSHRC=%q\n' "$HERMES_HOME/zshrc"
-} > "$HOME/.zshrc"
-cat "$APP_DIR/shell/zshrc-capture.zsh" >> "$HOME/.zshrc"
-printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.zshrc"
-echo "zsh interactive config ready ($HOME/.zshrc)."
 
 # ── Pool key promotion ──
 promote_first_pool_key() {
@@ -425,7 +433,8 @@ setup_coding_agents() {
 	CODING_HOME="$HOME" OC_MODEL="$oc_model" "$APP_DIR/boot/setup-coding-agents.py" \
 		|| echo "coding-agent setup: skipped (python error)"
 }
-setup_coding_agents
+setup_coding_agents &
+CODING_AGENTS_PID=$!
 
 # ── Claude Code plugin marketplaces: re-add missing clones at boot ────────────
 restore_claude_marketplaces() {
@@ -433,26 +442,37 @@ restore_claude_marketplaces() {
 	local km="$HOME/.claude/plugins/known_marketplaces.json"
 	[ -f "$km" ] || return 0
 	export CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1
-	local src
+	local src pids=()
 	while IFS= read -r src; do
 		[ -n "$src" ] || continue
-		if claude plugin marketplace add "$src" >/dev/null 2>&1; then
-			log "Re-added Claude marketplace: $src"
-		else
-			warn "Claude marketplace re-add failed: $src"
-		fi
+		(
+			if claude plugin marketplace add "$src" >/dev/null 2>&1; then
+				log "Re-added Claude marketplace: $src"
+			else
+				warn "Claude marketplace re-add failed: $src"
+			fi
+		) &
+		pids+=($!)
 	done < <("$APP_DIR/boot/restore-marketplaces.py" "$km" "$HOME/.claude/plugins/marketplaces")
+	[ ${#pids[@]} -gt 0 ] && wait "${pids[@]}" || true
 }
-restore_claude_marketplaces
+restore_claude_marketplaces &
+MARKETPLACE_PID=$!
 
 # ── Hermes config setup (via CLI, not YAML) ───────────────────────────────
 log "Configuring Hermes via CLI"
 
-# ── hermes update on rerun (every boot after the first) ───────────────
+# ── hermes update on rerun (background — overlaps with bg-tasks wait) ─────────
+HERMES_UPDATE_PID=""
 if "$APP_DIR/boot/is-first-run.py"; then
 	log "Re-run detected — running hermes update"
-	hermes update >/dev/null 2>&1 || warn "hermes update failed (continuing)"
+	(hermes update >/dev/null 2>&1 || warn "hermes update failed (continuing)") &
+	HERMES_UPDATE_PID=$!
 fi
+
+# ── Wait for background tasks while update runs ────────────────────────────────
+wait "${CODING_AGENTS_PID:-}" "${MARKETPLACE_PID:-}" 2>/dev/null || true
+wait "${HERMES_UPDATE_PID:-}" 2>/dev/null || true
 
 # ── Idempotent API-key sync (pools + singular provider keys) ────────────────
 log "Syncing API keys (idempotent)"
@@ -542,13 +562,15 @@ if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
 	log "✓ Telegram connect timeout -> ${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT}s"
 fi
 
-# ── Polling mode: clear any stale webhook so getUpdates can take over ──────────
+# ── Polling mode: clear any stale webhook (background — completes before gateway polls) ──
+CLEAR_WEBHOOK_PID=""
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
 	if [ -z "${TELEGRAM_BASE_URL:-}" ] && { [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; }; then
 		warn "Polling on $PLATFORM without a Telegram proxy (set CLOUDFLARE_PROXY_URL or TELEGRAM_BASE_URL) — outbound api.telegram.org is blocked; getUpdates will hang"
 	else
-		TELEGRAM_API_BASE="${TELEGRAM_BASE_URL:-https://api.telegram.org/bot}" \
-			"$APP_DIR/boot/clear-webhook.py" && log "Telegram webhook cleared (polling mode)" || warn "deleteWebhook failed (continuing; polling may 409 if a webhook is still registered)"
+		( TELEGRAM_API_BASE="${TELEGRAM_BASE_URL:-https://api.telegram.org/bot}" \
+			"$APP_DIR/boot/clear-webhook.py" && log "Telegram webhook cleared (polling mode)" || warn "deleteWebhook failed (continuing; polling may 409 if a webhook is still registered)" ) &
+		CLEAR_WEBHOOK_PID=$!
 	fi
 fi
 
@@ -721,6 +743,9 @@ else
 	echo "Warning: Hermes WebUI not ready within ${WEBUI_READY_TIMEOUT}s. Last 20 log lines:"
 	tail -20 "$HERMES_HOME/logs/webui.log" || true
 fi
+
+# ── Wait for background Telegram webhook clear (must finish before polling) ────
+wait "${CLEAR_WEBHOOK_PID:-}" 2>/dev/null || true
 
 # ── Service restart loop (self-healing) ───────────────────────────────────────
 SUPERVISOR_POLL_INTERVAL="${SUPERVISOR_POLL_INTERVAL:-10}"

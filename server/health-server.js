@@ -47,6 +47,23 @@ const { statusPayload } = status;
 
 initPrivacyDetection();
 
+const dashboardRootRoutes = new Set([
+  "/config",
+  "/env",
+  "/models",
+  "/providers",
+  "/profiles",
+  "/sessions",
+  "/skills",
+  "/cron",
+  "/analytics",
+  "/logs",
+  "/plugins",
+  "/chat",
+  "/docs",
+]);
+const dashboardRootRoutesList = [...dashboardRootRoutes];
+
 const server = http.createServer(async (req, res) => {
   const parsed = new URL(req.url, "http://localhost");
   const path = parsed.pathname;
@@ -261,22 +278,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const dashboardRootRoutes = new Set([
-    "/config",
-    "/env",
-    "/models",
-    "/providers",
-    "/profiles",
-    "/sessions",
-    "/skills",
-    "/cron",
-    "/analytics",
-    "/logs",
-    "/plugins",
-    "/chat",
-    "/docs",
-  ]);
-  const dashboardRootRoutesList = [...dashboardRootRoutes];
   if (dashboardRootRoutes.has(path) || dashboardRootRoutesList.some((r) => path.startsWith(r + "/"))) {
     redirect(res, `${HM_PREFIX}/app${path}${parsed.search}`);
     return;
