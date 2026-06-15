@@ -7,8 +7,8 @@ umask 0077
 log() { echo "$*"; }
 warn() { echo "WARN: $*" >&2; }
 die() {
-	echo "FATAL: $*" >&2
-	exit 1
+  echo "FATAL: $*" >&2
+  exit 1
 }
 
 echo ""
@@ -26,7 +26,7 @@ AGENT_HOME="${HERMES_DATA_ROOT}/${AGENT_NAME}"
 HERMES_HOME="${AGENT_HOME}/.hermes"
 WORKSPACE_HOME="${AGENT_HOME}/workspace"
 WORKSPACE_LINK="/home/${AGENT_NAME}"
-STARTUP_FILE="$WORKSPACE_HOME/startup.sh"
+STARTUP_FILE="$HERMES_HOME/startup.sh"
 export HERMES_BACKUP_ROOT="$AGENT_HOME"
 
 log "Agent: $AGENT_NAME"
@@ -34,17 +34,17 @@ log "State: $HERMES_HOME"
 
 # ── Platform detection ────────────────────────────────────────────────────────
 if [ -n "${SPACE_ID:-}" ]; then
-	PLATFORM="hf"
+  PLATFORM="hf"
 elif [ -n "${RENDER:-}" ]; then
-	PLATFORM="render"
+  PLATFORM="render"
 else
-	PLATFORM="local"
+  PLATFORM="local"
 fi
 log "Detected platform: $PLATFORM"
 
 if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
-	export HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=true
-	log "Telegram IP-fallback disabled (base_url-only routing on $PLATFORM)"
+  export HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=true
+  log "Telegram IP-fallback disabled (base_url-only routing on $PLATFORM)"
 fi
 
 PUBLIC_PORT="${PORT:-7861}"
@@ -70,237 +70,249 @@ export HERMES_WEBUI_PORT="$WEBUI_PORT"
 
 # ── Unified auth: GATEWAY_TOKEN drives everything ─────────────────────
 if [ -z "${API_SERVER_KEY:-}" ]; then
-	if [ -n "${GATEWAY_TOKEN:-}" ]; then
-		export API_SERVER_KEY="$GATEWAY_TOKEN"
-	else
-		API_SERVER_KEY="$("$APP_DIR/boot/gen-token.py")"
-		export API_SERVER_KEY
-		echo "GATEWAY_TOKEN not set - generated an ephemeral token for this boot."
-	fi
+  if [ -n "${GATEWAY_TOKEN:-}" ]; then
+    export API_SERVER_KEY="$GATEWAY_TOKEN"
+  else
+    API_SERVER_KEY="$("$APP_DIR/boot/gen-token.py")"
+    export API_SERVER_KEY
+    echo "GATEWAY_TOKEN not set - generated an ephemeral token for this boot."
+  fi
 fi
 
 if [ -n "${GATEWAY_TOKEN:-}" ]; then
-	export HERMES_WEBUI_PASSWORD="${HERMES_WEBUI_PASSWORD:-$GATEWAY_TOKEN}"
+  export HERMES_WEBUI_PASSWORD="${HERMES_WEBUI_PASSWORD:-$GATEWAY_TOKEN}"
 fi
 
 # ── Setup state dirs ──────────────────────────────────────────────────
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,home,plugins,webui}
 
 if [ -d "$APP_DIR/hooks" ]; then
-	cp -a "$APP_DIR/hooks/." "$HERMES_HOME/hooks/"
-	echo "Gateway hooks seeded to $HERMES_HOME/hooks/."
+  cp -a "$APP_DIR/hooks/." "$HERMES_HOME/hooks/"
+  echo "Gateway hooks seeded to $HERMES_HOME/hooks/."
 fi
 
 if [ -d "$HERMES_HOME/logs" ]; then
-	for f in "$HERMES_HOME/logs"/*.log; do
-		[ -f "$f" ] || continue
-		sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
-		if [ "$sz" -gt 5242880 ]; then
-			mv -f "$f" "${f}.1"
-			: >"$f"
-			echo "rotated $(basename "$f") ($sz bytes -> .1)"
-		fi
-	done
+  for f in "$HERMES_HOME/logs"/*.log; do
+    [ -f "$f" ] || continue
+    sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+    if [ "$sz" -gt 5242880 ]; then
+      mv -f "$f" "${f}.1"
+      : >"$f"
+      echo "rotated $(basename "$f") ($sz bytes -> .1)"
+    fi
+  done
 fi
 
 mkdir -p "$HERMES_HOME/.local/bin"
 ln -sfn /opt/hermes/.venv/bin/hermes "$HERMES_HOME/.local/bin/hermes"
 
-if mkdir -p "$(dirname "$WORKSPACE_LINK")" 2>/dev/null \
-	&& { [ -L "$WORKSPACE_LINK" ] || [ ! -e "$WORKSPACE_LINK" ]; } \
-	&& ln -sfn "$AGENT_HOME" "$WORKSPACE_LINK" 2>/dev/null; then
-	export HOME="$WORKSPACE_LINK"
-	log "Home: $HOME -> $AGENT_HOME"
-	if [ "$HERMES_DATA_ROOT" != "$AGENT_HOME" ]; then
-		printf '%s\n' \
-			'# hermes: re-home login shells to the per-agent friendly home' \
-			'[ -d "/home/${AGENT_NAME:-primary}" ] && export HOME="/home/${AGENT_NAME:-primary}"' \
-			> "$HERMES_DATA_ROOT/.zshenv" 2>/dev/null || true
-		printf '%s\n' \
-			'# hermes: re-home login shells to the per-agent friendly home' \
-			'if [ -d "/home/${AGENT_NAME:-primary}" ]; then' \
-			'  export HOME="/home/${AGENT_NAME:-primary}"' \
-			'  [ -f "$HOME/.profile" ] && . "$HOME/.profile"' \
-			'fi' \
-			> "$HERMES_DATA_ROOT/.profile" 2>/dev/null || true
-	fi
+if mkdir -p "$(dirname "$WORKSPACE_LINK")" 2>/dev/null &&
+  { [ -L "$WORKSPACE_LINK" ] || [ ! -e "$WORKSPACE_LINK" ]; } &&
+  ln -sfn "$AGENT_HOME" "$WORKSPACE_LINK" 2>/dev/null; then
+  export HOME="$WORKSPACE_LINK"
+  log "Home: $HOME -> $AGENT_HOME"
+  if [ "$HERMES_DATA_ROOT" != "$AGENT_HOME" ]; then
+    printf '%s\n' \
+      '# hermes: re-home login shells to the per-agent friendly home' \
+      '[ -d "/home/${AGENT_NAME:-primary}" ] && export HOME="/home/${AGENT_NAME:-primary}"' \
+      >"$HERMES_DATA_ROOT/.zshenv" 2>/dev/null || true
+    printf '%s\n' \
+      '# hermes: re-home login shells to the per-agent friendly home' \
+      'if [ -d "/home/${AGENT_NAME:-primary}" ]; then' \
+      '  export HOME="/home/${AGENT_NAME:-primary}"' \
+      '  [ -f "$HOME/.profile" ] && . "$HOME/.profile"' \
+      'fi' \
+      >"$HERMES_DATA_ROOT/.profile" 2>/dev/null || true
+  fi
 else
-	warn "could not re-home to $WORKSPACE_LINK; keeping HOME=$HOME"
+  warn "could not re-home to $WORKSPACE_LINK; keeping HOME=$HOME"
 fi
 
 if [ ! -L "${HOME}/.hermes/plugins" ] && ! [ "${HOME}/.hermes" -ef "$HERMES_HOME" ]; then
-	mkdir -p "${HOME}/.hermes"
-	rm -rf "${HOME}/.hermes/plugins"
-	ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
+  mkdir -p "${HOME}/.hermes"
+  rm -rf "${HOME}/.hermes/plugins"
+  ln -sfn "$HERMES_HOME/plugins" "${HOME}/.hermes/plugins"
 fi
 
 # ── Shell capture wrappers (no restore dep — runs before restore) ─────────────
 if [ ! -f "$STARTUP_FILE" ]; then
-	mkdir -p "$WORKSPACE_HOME"
-	touch "$STARTUP_FILE"
-	chmod +x "$STARTUP_FILE"
-	echo "Created workspace/startup.sh"
+  mkdir -p "$(dirname "$STARTUP_FILE")"
+  cat >"$STARTUP_FILE" <<'STARTUP'
+#!/bin/bash
+
+command -v mimo >/dev/null 2>&1 || \
+	nohup bash -c 'curl -fsSL https://mimo.xiaomi.com/install | bash' >/dev/null 2>&1 &
+
+command -v omp >/dev/null 2>&1 || \
+	nohup bash -c 'curl -fsSL https://omp.sh/install | sh' >/dev/null 2>&1 &
+
+nohup bash -c 'claude install; chmod -R 700 ~/.claude/hooks' >/dev/null 2>&1 &
+
+nohup bash -c 'npm install -g opencode-ai@latest npm@latest' >/dev/null 2>&1 &
+STARTUP
+  chmod +x "$STARTUP_FILE"
+  echo "Created $STARTUP_FILE (seeded with tool-install hook)"
 fi
 cp "$APP_DIR/shell/bashrc-capture.sh" "$HOME/.bashrc"
-printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.bashrc"
-cat > "$HOME/.profile" << 'PROFILE'
+printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >>"$HOME/.bashrc"
+cat >"$HOME/.profile" <<'PROFILE'
 [ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc
 PROFILE
 echo "Shell capture wrappers ready."
 
 # ── zsh interactive config (no restore dep — runs before restore) ──────────
 {
-	printf 'HISTFILE=%q\n' "$HERMES_HOME/.zsh_history"
-	printf 'HERMES_PERSONAL_ZSHRC=%q\n' "$HERMES_HOME/zshrc"
-} > "$HOME/.zshrc"
-cat "$APP_DIR/shell/zshrc-capture.zsh" >> "$HOME/.zshrc"
-printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >> "$HOME/.zshrc"
-printf 'HERMES_ENV_FILE=%q\n' "$HERMES_HOME/.env" >> "$HOME/.zshrc"
+  printf 'HISTFILE=%q\n' "$HERMES_HOME/.zsh_history"
+  printf 'HERMES_PERSONAL_ZSHRC=%q\n' "$HERMES_HOME/zshrc"
+} >"$HOME/.zshrc"
+cat "$APP_DIR/shell/zshrc-capture.zsh" >>"$HOME/.zshrc"
+printf 'STARTUP_FILE=%q\n' "$STARTUP_FILE" >>"$HOME/.zshrc"
+printf 'HERMES_ENV_FILE=%q\n' "$HERMES_HOME/.env" >>"$HOME/.zshrc"
 echo "zsh interactive config ready ($HOME/.zshrc)."
 
 # ── Restore state from HF Storage Bucket (async, gated) ───────────────
 HERMES_RESTORE_PID=""
 if [ -n "${HF_TOKEN:-}" ]; then
-	echo "Restoring Hermes state from HF bucket ${BACKUP_BUCKET}/${AGENT_NAME}"
-	python3 "$APP_DIR/sync/hermes-sync.py" restore &
-	HERMES_RESTORE_PID=$!
+  echo "Restoring Hermes state from HF bucket ${BACKUP_BUCKET}/${AGENT_NAME}"
+  python3 "$APP_DIR/sync/hermes-sync.py" restore &
+  HERMES_RESTORE_PID=$!
 else
-	echo "HF_TOKEN not set - bucket persistence is disabled."
+  echo "HF_TOKEN not set - bucket persistence is disabled."
 fi
 
 # ── Cloudflare proxy (optional) ──
 CLOUDFLARE_WORKERS_TOKEN="${CLOUDFLARE_WORKERS_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
 export CLOUDFLARE_WORKERS_TOKEN
 if [ -n "${CLOUDFLARE_WORKERS_TOKEN:-}" ] || [ -n "${CLOUDFLARE_PROXY_URL:-}" ]; then
-	export CLOUDFLARE_PROXY_DEBUG="${CLOUDFLARE_PROXY_DEBUG:-false}"
-	echo "Preparing Cloudflare Telegram proxy"
-	python3 "$APP_DIR/network/cloudflare-proxy-setup.py" || true
-	if [ -f "$CF_PROXY_ENV_FILE" ]; then
-		. "$CF_PROXY_ENV_FILE"
-	fi
+  export CLOUDFLARE_PROXY_DEBUG="${CLOUDFLARE_PROXY_DEBUG:-false}"
+  echo "Preparing Cloudflare Telegram proxy"
+  python3 "$APP_DIR/network/cloudflare-proxy-setup.py" || true
+  if [ -f "$CF_PROXY_ENV_FILE" ]; then
+    . "$CF_PROXY_ENV_FILE"
+  fi
 fi
 
 if [ -n "${CLOUDFLARE_WORKERS_TOKEN:-}" ]; then
-	echo "Preparing Cloudflare Keepalive worker"
-	python3 "$APP_DIR/network/cloudflare-keepalive-setup.py" || true
+  echo "Preparing Cloudflare Keepalive worker"
+  python3 "$APP_DIR/network/cloudflare-keepalive-setup.py" || true
 fi
 
 if [ -n "$HERMES_RESTORE_PID" ]; then
-	wait "$HERMES_RESTORE_PID" || true
-	echo "HF restore complete."
+  wait "$HERMES_RESTORE_PID" || true
+  echo "HF restore complete."
 fi
 
 if [ -d "$HERMES_HOME/workspace" ] && [ ! -e "$WORKSPACE_HOME" ]; then
-	mv "$HERMES_HOME/workspace" "$WORKSPACE_HOME" \
-		&& log "Migrated workspace -> $WORKSPACE_HOME" \
-		|| log "WARN: workspace migration failed; data left at $HERMES_HOME/workspace"
+  mv "$HERMES_HOME/workspace" "$WORKSPACE_HOME" &&
+    log "Migrated workspace -> $WORKSPACE_HOME" ||
+    log "WARN: workspace migration failed; data left at $HERMES_HOME/workspace"
 fi
 [ -d "$HERMES_HOME/workspace" ] || mkdir -p "$WORKSPACE_HOME"
 
 # ── Memory-OS: seed consolidation skill + cron job (additive, idempotent) ──
 if [ -d "$APP_DIR/skills" ]; then
-	cp -a "$APP_DIR/skills/." "$HERMES_HOME/skills/"
-	echo "Assistant skills seeded to $HERMES_HOME/skills/."
+  cp -a "$APP_DIR/skills/." "$HERMES_HOME/skills/"
+  echo "Assistant skills seeded to $HERMES_HOME/skills/."
 fi
 mkdir -p "$HERMES_HOME/memories/longterm" "$HERMES_HOME/memories/.backups"
 if [ ! -f "$HERMES_HOME/memories/.backups/initial-seed.done" ]; then
-	for mf in MEMORY.md USER.md; do
-		[ -f "$HERMES_HOME/memories/$mf" ] && cp -a "$HERMES_HOME/memories/$mf" "$HERMES_HOME/memories/.backups/$mf.initial" || true
-	done
-	touch "$HERMES_HOME/memories/.backups/initial-seed.done"
+  for mf in MEMORY.md USER.md; do
+    [ -f "$HERMES_HOME/memories/$mf" ] && cp -a "$HERMES_HOME/memories/$mf" "$HERMES_HOME/memories/.backups/$mf.initial" || true
+  done
+  touch "$HERMES_HOME/memories/.backups/initial-seed.done"
 fi
 HERMES_BIN="/opt/hermes/.venv/bin/hermes"
 
 # ── Taste capture: seed preference files before cron block ───────────────────
 for tf in TASTE-ledger.md TASTE-signals.md; do
-	[ -f "$HERMES_HOME/memories/longterm/$tf" ] || : >"$HERMES_HOME/memories/longterm/$tf"
+  [ -f "$HERMES_HOME/memories/longterm/$tf" ] || : >"$HERMES_HOME/memories/longterm/$tf"
 done
 
 # ── Cron registrations: memory-os + taste-capture in parallel ────────────────
 if [ -x "$HERMES_BIN" ]; then
-	(
-		cron_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
-		if printf '%s\n' "$cron_jobs" | grep -q "memory-os-consolidation"; then
-			echo "memory-os cron job already present."
-		elif "$HERMES_BIN" cron create "every 360m" \
-			"Run the memory-os consolidation pass now. Load and follow the memory-os skill end to end: back up memory, read new sessions from state.db since the watermark, distill durable facts, append them to the long-term archive, then refresh MEMORY.md and USER.md within their char caps. Additive and lossless; never delete existing memory; never store secrets or PII." \
-			--name "memory-os-consolidation" \
-			--deliver local \
-			--skill memory-os >/dev/null 2>&1; then
-			echo "memory-os cron job registered (every 360m)."
-		else
-			echo "memory-os cron registration skipped (non-fatal)."
-		fi
-	) &
-	CRON_MEM_PID=$!
-	(
-		taste_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
-		if printf '%s\n' "$taste_jobs" | grep -q "taste-capture"; then
-			echo "taste-capture cron job already present."
-		elif "$HERMES_BIN" cron create "every 730m" \
-			"Run the taste-capture consolidation pass now. Load and follow the taste-capture skill end to end: read the queued correction signals (fall back to recent sessions if empty), distill durable confidence-gated preferences, append them with provenance to the long-term taste ledger, then refresh only the marked taste block in USER.md within its char cap. Additive and lossless; preserve all non-taste memory; never store secrets or PII; shape output, never erase personality." \
-			--name "taste-capture" \
-			--deliver local \
-			--skill taste-capture >/dev/null 2>&1; then
-			echo "taste-capture cron job registered (every 730m)."
-		else
-			echo "taste-capture cron registration skipped (non-fatal)."
-		fi
-	) &
-	CRON_TASTE_PID=$!
-	wait "$CRON_MEM_PID" "$CRON_TASTE_PID" || true
+  (
+    cron_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
+    if printf '%s\n' "$cron_jobs" | grep -q "memory-os-consolidation"; then
+      echo "memory-os cron job already present."
+    elif "$HERMES_BIN" cron create "every 360m" \
+      "Run the memory-os consolidation pass now. Load and follow the memory-os skill end to end: back up memory, read new sessions from state.db since the watermark, distill durable facts, append them to the long-term archive, then refresh MEMORY.md and USER.md within their char caps. Additive and lossless; never delete existing memory; never store secrets or PII." \
+      --name "memory-os-consolidation" \
+      --deliver local \
+      --skill memory-os >/dev/null 2>&1; then
+      echo "memory-os cron job registered (every 360m)."
+    else
+      echo "memory-os cron registration skipped (non-fatal)."
+    fi
+  ) &
+  CRON_MEM_PID=$!
+  (
+    taste_jobs="$("$HERMES_BIN" cron list --all 2>/dev/null || true)"
+    if printf '%s\n' "$taste_jobs" | grep -q "taste-capture"; then
+      echo "taste-capture cron job already present."
+    elif "$HERMES_BIN" cron create "every 730m" \
+      "Run the taste-capture consolidation pass now. Load and follow the taste-capture skill end to end: read the queued correction signals (fall back to recent sessions if empty), distill durable confidence-gated preferences, append them with provenance to the long-term taste ledger, then refresh only the marked taste block in USER.md within its char cap. Additive and lossless; preserve all non-taste memory; never store secrets or PII; shape output, never erase personality." \
+      --name "taste-capture" \
+      --deliver local \
+      --skill taste-capture >/dev/null 2>&1; then
+      echo "taste-capture cron job registered (every 730m)."
+    else
+      echo "taste-capture cron registration skipped (non-fatal)."
+    fi
+  ) &
+  CRON_TASTE_PID=$!
+  wait "$CRON_MEM_PID" "$CRON_TASTE_PID" || true
 fi
 
 # ── Telegram env normalisation (aliases + webhook URL + secret) ───────
 if [ -n "${TELEGRAM_USER_IDS:-}" ] && [ -z "${TELEGRAM_ALLOWED_USERS:-}" ]; then
-	export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_IDS"
+  export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_IDS"
 elif [ -n "${TELEGRAM_USER_ID:-}" ] && [ -z "${TELEGRAM_ALLOWED_USERS:-}" ]; then
-	export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_ID"
+  export TELEGRAM_ALLOWED_USERS="$TELEGRAM_USER_ID"
 fi
 
 # ── Telegram home channel auto-seed ───────────────────────────────────
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-	HERMES_ENV_FILE="$HERMES_HOME/.env"
-	if [ -f "$HERMES_ENV_FILE" ] && grep -q '^TELEGRAM_HOME_CHANNEL=' "$HERMES_ENV_FILE"; then
-		:
-	else
-		TG_HOME="${TELEGRAM_HOME_CHANNEL:-}"
-		if [ -z "$TG_HOME" ] && [ -n "${TELEGRAM_ALLOWED_USERS:-}" ]; then
-			TG_HOME="${TELEGRAM_ALLOWED_USERS%%,*}"
-		fi
-		TG_HOME="$(printf '%s' "$TG_HOME" | tr -d '[:space:]')"
-		if [ -n "$TG_HOME" ]; then
-			touch "$HERMES_ENV_FILE"
-			chmod 600 "$HERMES_ENV_FILE"
-			[ -s "$HERMES_ENV_FILE" ] && [ -n "$(tail -c1 "$HERMES_ENV_FILE")" ] && printf '\n' >>"$HERMES_ENV_FILE"
-			printf 'TELEGRAM_HOME_CHANNEL=%s\n' "$TG_HOME" >>"$HERMES_ENV_FILE"
-			export TELEGRAM_HOME_CHANNEL="$TG_HOME"
-			echo "Telegram home channel seeded to $TG_HOME (run /sethome in another chat to change)."
-		fi
-	fi
+  HERMES_ENV_FILE="$HERMES_HOME/.env"
+  if [ -f "$HERMES_ENV_FILE" ] && grep -q '^TELEGRAM_HOME_CHANNEL=' "$HERMES_ENV_FILE"; then
+    :
+  else
+    TG_HOME="${TELEGRAM_HOME_CHANNEL:-}"
+    if [ -z "$TG_HOME" ] && [ -n "${TELEGRAM_ALLOWED_USERS:-}" ]; then
+      TG_HOME="${TELEGRAM_ALLOWED_USERS%%,*}"
+    fi
+    TG_HOME="$(printf '%s' "$TG_HOME" | tr -d '[:space:]')"
+    if [ -n "$TG_HOME" ]; then
+      touch "$HERMES_ENV_FILE"
+      chmod 600 "$HERMES_ENV_FILE"
+      [ -s "$HERMES_ENV_FILE" ] && [ -n "$(tail -c1 "$HERMES_ENV_FILE")" ] && printf '\n' >>"$HERMES_ENV_FILE"
+      printf 'TELEGRAM_HOME_CHANNEL=%s\n' "$TG_HOME" >>"$HERMES_ENV_FILE"
+      export TELEGRAM_HOME_CHANNEL="$TG_HOME"
+      echo "Telegram home channel seeded to $TG_HOME (run /sethome in another chat to change)."
+    fi
+  fi
 fi
 
 if [ "${TELEGRAM_MODE:-}" = "polling" ] && [ -n "${TELEGRAM_WEBHOOK_URL:-}" ]; then
-	log "TELEGRAM_MODE=polling — ignoring TELEGRAM_WEBHOOK_URL"
-	unset TELEGRAM_WEBHOOK_URL
+  log "TELEGRAM_MODE=polling — ignoring TELEGRAM_WEBHOOK_URL"
+  unset TELEGRAM_WEBHOOK_URL
 fi
 
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${SPACE_HOST:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
-	if [ "${TELEGRAM_MODE:-webhook}" != "polling" ]; then
-		export TELEGRAM_WEBHOOK_URL="https://${SPACE_HOST}/telegram"
-	fi
+  if [ "${TELEGRAM_MODE:-webhook}" != "polling" ]; then
+    export TELEGRAM_WEBHOOK_URL="https://${SPACE_HOST}/telegram"
+  fi
 fi
 
 if [ -n "${TELEGRAM_WEBHOOK_URL:-}" ] && [ -z "${TELEGRAM_WEBHOOK_SECRET:-}" ]; then
-	SECRET_FILE="$HERMES_HOME/.hermes-telegram-webhook-secret"
-	if [ -f "$SECRET_FILE" ]; then
-		TELEGRAM_WEBHOOK_SECRET="$(cat "$SECRET_FILE")"
-	else
-		TELEGRAM_WEBHOOK_SECRET="$("$APP_DIR/boot/gen-webhook-secret.py")"
-		printf '%s' "$TELEGRAM_WEBHOOK_SECRET" >"$SECRET_FILE"
-		chmod 600 "$SECRET_FILE"
-	fi
-	export TELEGRAM_WEBHOOK_SECRET
+  SECRET_FILE="$HERMES_HOME/.hermes-telegram-webhook-secret"
+  if [ -f "$SECRET_FILE" ]; then
+    TELEGRAM_WEBHOOK_SECRET="$(cat "$SECRET_FILE")"
+  else
+    TELEGRAM_WEBHOOK_SECRET="$("$APP_DIR/boot/gen-webhook-secret.py")"
+    printf '%s' "$TELEGRAM_WEBHOOK_SECRET" >"$SECRET_FILE"
+    chmod 600 "$SECRET_FILE"
+  fi
+  export TELEGRAM_WEBHOOK_SECRET
 fi
 
 # ── Provider-prefix mapping (Hermes convention) ───────────────────
@@ -310,36 +322,36 @@ PROVIDER_FOR_CONFIG="${HERMES_INFERENCE_PROVIDER:-auto}"
 LLM_API_KEY="${LLM_API_KEY:-}"
 
 if [ -n "$MODEL_INPUT" ]; then
-	MODEL_PREFIX="${MODEL_INPUT%%/*}"
+  MODEL_PREFIX="${MODEL_INPUT%%/*}"
 else
-	MODEL_PREFIX=""
+  MODEL_PREFIX=""
 fi
 
 case "$MODEL_PREFIX" in
 openrouter)
-	[ -n "$LLM_API_KEY" ] && export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$LLM_API_KEY}"
-	[ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="openrouter"
-	MODEL_FOR_CONFIG="${MODEL_INPUT#openrouter/}"
-	;;
+  [ -n "$LLM_API_KEY" ] && export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$LLM_API_KEY}"
+  [ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="openrouter"
+  MODEL_FOR_CONFIG="${MODEL_INPUT#openrouter/}"
+  ;;
 huggingface | hf)
-	[ -n "$LLM_API_KEY" ] && export HF_TOKEN="${HF_TOKEN:-$LLM_API_KEY}"
-	[ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="huggingface"
-	MODEL_FOR_CONFIG="${MODEL_INPUT#huggingface/}"
-	;;
+  [ -n "$LLM_API_KEY" ] && export HF_TOKEN="${HF_TOKEN:-$LLM_API_KEY}"
+  [ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="huggingface"
+  MODEL_FOR_CONFIG="${MODEL_INPUT#huggingface/}"
+  ;;
 vercel-ai-gateway | ai-gateway)
-	[ -n "$LLM_API_KEY" ] && export AI_GATEWAY_API_KEY="${AI_GATEWAY_API_KEY:-$LLM_API_KEY}"
-	[ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="ai-gateway"
-	MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
-	;;
+  [ -n "$LLM_API_KEY" ] && export AI_GATEWAY_API_KEY="${AI_GATEWAY_API_KEY:-$LLM_API_KEY}"
+  [ "$PROVIDER_FOR_CONFIG" = "auto" ] && PROVIDER_FOR_CONFIG="ai-gateway"
+  MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
+  ;;
 google | gemini)
-	[ -n "$LLM_API_KEY" ] && export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$LLM_API_KEY}" GEMINI_API_KEY="${GEMINI_API_KEY:-$LLM_API_KEY}"
-	PROVIDER_FOR_CONFIG="gemini"
-	MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
-	;;
+  [ -n "$LLM_API_KEY" ] && export GOOGLE_API_KEY="${GOOGLE_API_KEY:-$LLM_API_KEY}" GEMINI_API_KEY="${GEMINI_API_KEY:-$LLM_API_KEY}"
+  PROVIDER_FOR_CONFIG="gemini"
+  MODEL_FOR_CONFIG="${MODEL_INPUT#*/}"
+  ;;
 esac
 
 [ -n "$MODEL_PREFIX" ] && {
-SIMPLE_PROVIDER_MAP="\
+  SIMPLE_PROVIDER_MAP="\
 anthropic:ANTHROPIC_API_KEY \
 openai|openai-codex:OPENAI_API_KEY \
 deepseek:DEEPSEEK_API_KEY \
@@ -361,19 +373,20 @@ kilocode:KILOCODE_API_KEY \
 opencode-zen:OPENCODE_ZEN_API_KEY \
 opencode-go:OPENCODE_GO_API_KEY \
 ollama-cloud|ollama:OLLAMA_API_KEY"
-for _sp in $SIMPLE_PROVIDER_MAP; do
-	_sp_patterns="${_sp%%:*}" _sp_var="${_sp##*:}"
-	case "$MODEL_PREFIX" in ($_sp_patterns)
-		[ -n "$LLM_API_KEY" ] && export "$_sp_var=${!_sp_var:-$LLM_API_KEY}"
-		break ;;
-	esac
-done
-unset _sp _sp_patterns _sp_var SIMPLE_PROVIDER_MAP
+  for _sp in $SIMPLE_PROVIDER_MAP; do
+    _sp_patterns="${_sp%%:*}" _sp_var="${_sp##*:}"
+    case "$MODEL_PREFIX" in $_sp_patterns)
+      [ -n "$LLM_API_KEY" ] && export "$_sp_var=${!_sp_var:-$LLM_API_KEY}"
+      break
+      ;;
+    esac
+  done
+  unset _sp _sp_patterns _sp_var SIMPLE_PROVIDER_MAP
 }
 
 if [ -n "${CUSTOM_BASE_URL:-}" ]; then
-	PROVIDER_FOR_CONFIG="${CUSTOM_PROVIDER:-custom}"
-	[ -n "$LLM_API_KEY" ] && export OPENAI_API_KEY="${OPENAI_API_KEY:-$LLM_API_KEY}"
+  PROVIDER_FOR_CONFIG="${CUSTOM_PROVIDER:-custom}"
+  [ -n "$LLM_API_KEY" ] && export OPENAI_API_KEY="${OPENAI_API_KEY:-$LLM_API_KEY}"
 fi
 
 export MODEL_FOR_CONFIG PROVIDER_FOR_CONFIG
@@ -385,77 +398,78 @@ export TELEGRAM_BASE_URL="${TELEGRAM_BASE_URL:-}"
 export TELEGRAM_BASE_FILE_URL="${TELEGRAM_BASE_FILE_URL:-}"
 
 if [ -n "${CLOUDFLARE_PROXY_URL:-}" ] && [ -z "$TELEGRAM_BASE_URL" ]; then
-	CLOUDFLARE_PROXY_URL="${CLOUDFLARE_PROXY_URL%/}"
-	export TELEGRAM_BASE_URL="${CLOUDFLARE_PROXY_URL}/bot"
-	export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
+  CLOUDFLARE_PROXY_URL="${CLOUDFLARE_PROXY_URL%/}"
+  export TELEGRAM_BASE_URL="${CLOUDFLARE_PROXY_URL}/bot"
+  export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
 fi
 
 # ── p10k theme (needs restored state — runs after restore wait) ───────────────
 if [ -f "$HERMES_HOME/p10k.zsh" ]; then
-	cp -f "$HERMES_HOME/p10k.zsh" "$HOME/.p10k.zsh"
+  cp -f "$HERMES_HOME/p10k.zsh" "$HOME/.p10k.zsh"
 fi
 
 # ── Pool key promotion ──
 promote_first_pool_key() {
-	local singular_var="$1"
-	local pool_var="$2"
-	local singular_val="${!singular_var:-}"
-	local pool_val="${!pool_var:-}"
-	[ -n "$singular_val" ] && return 0
-	[ -n "$pool_val" ] || return 0
-	local last
-	last=$(printf '%s' "$pool_val" \
-		| sed -e 's/^[[:space:]]*\[//' -e 's/\][[:space:]]*$//' \
-		| tr ',' '\n' \
-		| sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-		| awk 'NF{last=$0} END{if(last!="") print last}' \
-		| sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")
-	[ -n "$last" ] || return 0
-	export "${singular_var}=$last"
+  local singular_var="$1"
+  local pool_var="$2"
+  local singular_val="${!singular_var:-}"
+  local pool_val="${!pool_var:-}"
+  [ -n "$singular_val" ] && return 0
+  [ -n "$pool_val" ] || return 0
+  local last
+  last=$(printf '%s' "$pool_val" |
+    sed -e 's/^[[:space:]]*\[//' -e 's/\][[:space:]]*$//' |
+    tr ',' '\n' |
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' |
+    awk 'NF{last=$0} END{if(last!="") print last}' |
+    sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//")
+  [ -n "$last" ] || return 0
+  export "${singular_var}=$last"
 }
 
 for _pk_pair in \
-	"OPENROUTER:OPENROUTER" "ANTHROPIC:ANTHROPIC" "OPENAI:OPENAI" \
-	"GOOGLE:GOOGLE" "DEEPSEEK:DEEPSEEK" "KIMI:KIMI" \
-	"MINIMAX:MINIMAX" "NVIDIA:NVIDIA" "XAI:XAI" \
-	"KILOCODE:KILOCODE" "GLM:GLM" "ARCEEAI:ARCEEAI" \
-	"DASHSCOPE:DASHSCOPE" "GMI:GMI" "GROQ:GROQ" \
-	"TOKENHUB:TOKENHUB" "OLLAMA:OLLAMA" "OPENCODE:OPENCODE" \
-	"CLAUDE_CODE_OAUTH_TOKEN:CLAUDE_CODE_OAUTH_TOKEN"; do
-	_pk_s="${_pk_pair%%:*}_API_KEY"; _pk_p="${_pk_pair##*:}_API_KEYS"
-	[ "$_pk_pair" = "CLAUDE_CODE_OAUTH_TOKEN:CLAUDE_CODE_OAUTH_TOKEN" ] && _pk_p="CLAUDE_CODE_OAUTH_TOKENS"
-	promote_first_pool_key "$_pk_s" "$_pk_p"
+  "OPENROUTER:OPENROUTER" "ANTHROPIC:ANTHROPIC" "OPENAI:OPENAI" \
+  "GOOGLE:GOOGLE" "DEEPSEEK:DEEPSEEK" "KIMI:KIMI" \
+  "MINIMAX:MINIMAX" "NVIDIA:NVIDIA" "XAI:XAI" \
+  "KILOCODE:KILOCODE" "GLM:GLM" "ARCEEAI:ARCEEAI" \
+  "DASHSCOPE:DASHSCOPE" "GMI:GMI" "GROQ:GROQ" \
+  "TOKENHUB:TOKENHUB" "OLLAMA:OLLAMA" "OPENCODE:OPENCODE" \
+  "CLAUDE_CODE_OAUTH_TOKEN:CLAUDE_CODE_OAUTH_TOKEN"; do
+  _pk_s="${_pk_pair%%:*}_API_KEY"
+  _pk_p="${_pk_pair##*:}_API_KEYS"
+  [ "$_pk_pair" = "CLAUDE_CODE_OAUTH_TOKEN:CLAUDE_CODE_OAUTH_TOKEN" ] && _pk_p="CLAUDE_CODE_OAUTH_TOKENS"
+  promote_first_pool_key "$_pk_s" "$_pk_p"
 done
 unset _pk_pair _pk_s _pk_p
 
 # ── Coding-agent CLIs (claude-code + opencode) headless setup ───────────────
 setup_coding_agents() {
-	local oc_model="${CODING_AGENT_OPENCODE_MODEL:-opencode/mimo-v2.5-free}"
-	CODING_HOME="$HOME" OC_MODEL="$oc_model" "$APP_DIR/boot/setup-coding-agents.py" \
-		|| echo "coding-agent setup: skipped (python error)"
+  local oc_model="${CODING_AGENT_OPENCODE_MODEL:-opencode/mimo-v2.5-free}"
+  CODING_HOME="$HOME" OC_MODEL="$oc_model" "$APP_DIR/boot/setup-coding-agents.py" ||
+    echo "coding-agent setup: skipped (python error)"
 }
 setup_coding_agents &
 CODING_AGENTS_PID=$!
 
 # ── Claude Code plugin marketplaces: re-add missing clones at boot ────────────
 restore_claude_marketplaces() {
-	command -v claude >/dev/null 2>&1 || return 0
-	local km="$HOME/.claude/plugins/known_marketplaces.json"
-	[ -f "$km" ] || return 0
-	export CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1
-	local src pids=()
-	while IFS= read -r src; do
-		[ -n "$src" ] || continue
-		(
-			if claude plugin marketplace add "$src" >/dev/null 2>&1; then
-				log "Re-added Claude marketplace: $src"
-			else
-				warn "Claude marketplace re-add failed: $src"
-			fi
-		) &
-		pids+=($!)
-	done < <("$APP_DIR/boot/restore-marketplaces.py" "$km" "$HOME/.claude/plugins/marketplaces")
-	[ ${#pids[@]} -gt 0 ] && wait "${pids[@]}" || true
+  command -v claude >/dev/null 2>&1 || return 0
+  local km="$HOME/.claude/plugins/known_marketplaces.json"
+  [ -f "$km" ] || return 0
+  export CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE=1
+  local src pids=()
+  while IFS= read -r src; do
+    [ -n "$src" ] || continue
+    (
+      if claude plugin marketplace add "$src" >/dev/null 2>&1; then
+        log "Re-added Claude marketplace: $src"
+      else
+        warn "Claude marketplace re-add failed: $src"
+      fi
+    ) &
+    pids+=($!)
+  done < <("$APP_DIR/boot/restore-marketplaces.py" "$km" "$HOME/.claude/plugins/marketplaces")
+  [ ${#pids[@]} -gt 0 ] && wait "${pids[@]}" || true
 }
 restore_claude_marketplaces &
 MARKETPLACE_PID=$!
@@ -466,9 +480,9 @@ log "Configuring Hermes via CLI"
 # ── hermes update on rerun (background — overlaps with bg-tasks wait) ─────────
 HERMES_UPDATE_PID=""
 if "$APP_DIR/boot/is-first-run.py"; then
-	log "Re-run detected — running hermes update"
-	(hermes update >/dev/null 2>&1 || warn "hermes update failed (continuing)") &
-	HERMES_UPDATE_PID=$!
+  log "Re-run detected — running hermes update"
+  (hermes update >/dev/null 2>&1 || warn "hermes update failed (continuing)") &
+  HERMES_UPDATE_PID=$!
 fi
 
 # ── Wait for background tasks while update runs ────────────────────────────────
@@ -481,42 +495,42 @@ python3 "$APP_DIR/sync/keys-sync.py" || warn "key sync failed (continuing)"
 
 # ── Set model + provider via CLI (more reliable than YAML) ───────────────────
 hermes config set model "$MODEL_FOR_CONFIG" &&
-	log "✓ Model: $MODEL_FOR_CONFIG" ||
-	warn "Failed to set model (continuing)"
+  log "✓ Model: $MODEL_FOR_CONFIG" ||
+  warn "Failed to set model (continuing)"
 
 hermes config set provider "$PROVIDER_FOR_CONFIG" &&
-	log "✓ Provider: $PROVIDER_FOR_CONFIG" ||
-	warn "Failed to set provider (continuing)"
+  log "✓ Provider: $PROVIDER_FOR_CONFIG" ||
+  warn "Failed to set provider (continuing)"
 
 # ── Custom endpoint support ────────────────────────────────────────────────────
 if [ -n "${CUSTOM_BASE_URL:-}" ]; then
-	hermes config set model.base_url "${CUSTOM_BASE_URL}" &&
-		log "✓ Custom base_url: $CUSTOM_BASE_URL" ||
-		warn "Failed to set custom base_url"
+  hermes config set model.base_url "${CUSTOM_BASE_URL}" &&
+    log "✓ Custom base_url: $CUSTOM_BASE_URL" ||
+    warn "Failed to set custom base_url"
 
-	[ -n "${CUSTOM_API_KEY:-}" ] &&
-		hermes config set model.api_key "${CUSTOM_API_KEY}" 2>/dev/null || true
+  [ -n "${CUSTOM_API_KEY:-}" ] &&
+    hermes config set model.api_key "${CUSTOM_API_KEY}" 2>/dev/null || true
 fi
 
 # ── Terminal/workspace ────────────────────────────────────────────────────────
 mkdir -p "$WORKSPACE_HOME"
 if [ -e "$WORKSPACE_LINK" ] && [ ! -L "$WORKSPACE_LINK" ]; then
-	warn "$WORKSPACE_LINK exists as a real path; using $WORKSPACE_HOME"
-	AGENT_WORKSPACE="$WORKSPACE_HOME"
+  warn "$WORKSPACE_LINK exists as a real path; using $WORKSPACE_HOME"
+  AGENT_WORKSPACE="$WORKSPACE_HOME"
 else
-	if mkdir -p "$(dirname "$WORKSPACE_LINK")" 2>/dev/null \
-		&& ln -sfn "$AGENT_HOME" "$WORKSPACE_LINK" 2>/dev/null; then
-		AGENT_WORKSPACE="$WORKSPACE_LINK/workspace"
-	else
-		warn "could not create $WORKSPACE_LINK (permission?); using $WORKSPACE_HOME"
-		AGENT_WORKSPACE="$WORKSPACE_HOME"
-	fi
+  if mkdir -p "$(dirname "$WORKSPACE_LINK")" 2>/dev/null &&
+    ln -sfn "$AGENT_HOME" "$WORKSPACE_LINK" 2>/dev/null; then
+    AGENT_WORKSPACE="$WORKSPACE_LINK/workspace"
+  else
+    warn "could not create $WORKSPACE_LINK (permission?); using $WORKSPACE_HOME"
+    AGENT_WORKSPACE="$WORKSPACE_HOME"
+  fi
 fi
 export TMATE_CWD="$AGENT_WORKSPACE"
 hermes config set terminal.cwd "$AGENT_WORKSPACE" 2>/dev/null || true
 TMUX_CONF="$HOME/.tmux.conf"
 if ! grep -qxF 'set -g mouse on' "$TMUX_CONF" 2>/dev/null; then
-	cat >> "$TMUX_CONF" <<'TMUXCONF'
+  cat >>"$TMUX_CONF" <<'TMUXCONF'
 set -g mouse on
 bind c new-window -c "#{pane_current_path}"
 bind '"' split-window -v -c "#{pane_current_path}"
@@ -529,73 +543,77 @@ hermes config set display.background_process_notifications "${HERMES_BACKGROUND_
 
 # ── Telegram platform config (augments CLI-written config.yaml) ───────────────
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-	log "Configuring Telegram platform"
-	"$APP_DIR/boot/configure-telegram.py"
+  log "Configuring Telegram platform"
+  "$APP_DIR/boot/configure-telegram.py"
 fi
 
 hermes config set telegram.reactions true &&
-	log "✓ Telegram reactions enabled" ||
-	warn "Failed to set telegram.reactions (continuing)"
+  log "✓ Telegram reactions enabled" ||
+  warn "Failed to set telegram.reactions (continuing)"
 
 if [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; then
-	if [ -n "${TELEGRAM_BASE_URL:-}" ]; then
-		PROXY_HOST="${TELEGRAM_BASE_URL#*://}"
-		PROXY_HOST="${PROXY_HOST%%/*}"
-		if [ -n "$PROXY_HOST" ] && [ "$PROXY_HOST" != "api.telegram.org" ]; then
-			SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/local/lib/python3.14/site-packages")
-			find "$SITE_PACKAGES" -path "*/hermes*" -type f \( -name "*.py" -o -name "*.json" \) \
-				-exec sed -i "s/api.telegram.org/$PROXY_HOST/g" {} + 2>/dev/null || true
-			log "✓ Telegram proxy (sed-patch) -> $PROXY_HOST"
-		fi
-	fi
+  if [ -n "${TELEGRAM_BASE_URL:-}" ]; then
+    PROXY_HOST="${TELEGRAM_BASE_URL#*://}"
+    PROXY_HOST="${PROXY_HOST%%/*}"
+    if [ -n "$PROXY_HOST" ] && [ "$PROXY_HOST" != "api.telegram.org" ]; then
+      SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "/usr/local/lib/python3.14/site-packages")
+      find "$SITE_PACKAGES" -path "*/hermes*" -type f \( -name "*.py" -o -name "*.json" \) \
+        -exec sed -i "s/api.telegram.org/$PROXY_HOST/g" {} + 2>/dev/null || true
+      log "✓ Telegram proxy (sed-patch) -> $PROXY_HOST"
+    fi
+  fi
 
-	TG_FILE=$(python3 -c "import gateway.platforms.telegram as t; print(t.__file__)" 2>/dev/null || true)
-	if [ -n "$TG_FILE" ] && [ -f "$TG_FILE" ]; then
-		sed -i \
-			-e 's/from telegram.error import NetworkError, TimedOut$/from telegram.error import NetworkError, TimedOut, InvalidToken/' \
-			-e 's/except (NetworkError, TimedOut, OSError) as init_err:/except (NetworkError, TimedOut, OSError, InvalidToken) as init_err:/' \
-			"$TG_FILE" 2>/dev/null &&
-			log "✓ Telegram connect-retry hardened (sed-patch: retry InvalidToken)" ||
-			warn "Failed to harden Telegram connect-retry (continuing)"
-	fi
+  TG_FILE=$(python3 -c "import gateway.platforms.telegram as t; print(t.__file__)" 2>/dev/null || true)
+  if [ -n "$TG_FILE" ] && [ -f "$TG_FILE" ]; then
+    sed -i \
+      -e 's/from telegram.error import NetworkError, TimedOut$/from telegram.error import NetworkError, TimedOut, InvalidToken/' \
+      -e 's/except (NetworkError, TimedOut, OSError) as init_err:/except (NetworkError, TimedOut, OSError, InvalidToken) as init_err:/' \
+      "$TG_FILE" 2>/dev/null &&
+      log "✓ Telegram connect-retry hardened (sed-patch: retry InvalidToken)" ||
+      warn "Failed to harden Telegram connect-retry (continuing)"
+  fi
 
-	export HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT="${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT:-180}"
-	log "✓ Telegram connect timeout -> ${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT}s"
+  export HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT="${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT:-180}"
+  log "✓ Telegram connect timeout -> ${HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT}s"
 fi
 
 # ── Polling mode: clear any stale webhook (background — completes before gateway polls) ──
 CLEAR_WEBHOOK_PID=""
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
-	if [ -z "${TELEGRAM_BASE_URL:-}" ] && { [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; }; then
-		warn "Polling on $PLATFORM without a Telegram proxy (set CLOUDFLARE_PROXY_URL or TELEGRAM_BASE_URL) — outbound api.telegram.org is blocked; getUpdates will hang"
-	else
-		( TELEGRAM_API_BASE="${TELEGRAM_BASE_URL:-https://api.telegram.org/bot}" \
-			"$APP_DIR/boot/clear-webhook.py" && log "Telegram webhook cleared (polling mode)" || warn "deleteWebhook failed (continuing; polling may 409 if a webhook is still registered)" ) &
-		CLEAR_WEBHOOK_PID=$!
-	fi
+  if [ -z "${TELEGRAM_BASE_URL:-}" ] && { [ "$PLATFORM" = "hf" ] || [ "$PLATFORM" = "render" ]; }; then
+    warn "Polling on $PLATFORM without a Telegram proxy (set CLOUDFLARE_PROXY_URL or TELEGRAM_BASE_URL) — outbound api.telegram.org is blocked; getUpdates will hang"
+  else
+    (TELEGRAM_API_BASE="${TELEGRAM_BASE_URL:-https://api.telegram.org/bot}" \
+      "$APP_DIR/boot/clear-webhook.py" && log "Telegram webhook cleared (polling mode)" || warn "deleteWebhook failed (continuing; polling may 409 if a webhook is still registered)") &
+    CLEAR_WEBHOOK_PID=$!
+  fi
 fi
 
 # ── SSH Debug Access (tmate) ──────────────────────────────────────────────────
 TMATE_WAITER_PID=""
 TMATE_DIR="${TMATE_DIR:-/tmp/tmate}"
 start_tmate_boot() {
-	if ! command -v tmate >/dev/null 2>&1 || ! command -v tmate-tools >/dev/null 2>&1; then
-		return 0
-	fi
-	echo "set -g mouse off" >"$HOME/.tmate.conf"
-	local out ssh_url
-	out=$(tmate-tools boot 2>/dev/null) || { warn "tmate boot failed"; return 1; }
-	ssh_url=$(echo "$out" | sed -n 's/^ssh:[[:space:]]*//p')
-	if [ -n "${ssh_url:-}" ]; then
-		log "SSH access: $ssh_url"
-	else
-		log "tmate unavailable for SSH debugging"
-	fi
+  if ! command -v tmate >/dev/null 2>&1 || ! command -v tmate-tools >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "set -g mouse off" >"$HOME/.tmate.conf"
+  local out ssh_url
+  out=$(tmate-tools boot 2>/dev/null) || {
+    warn "tmate boot failed"
+    return 1
+  }
+  ssh_url=$(echo "$out" | sed -n 's/^ssh:[[:space:]]*//p')
+  if [ -n "${ssh_url:-}" ]; then
+    log "SSH access: $ssh_url"
+  else
+    log "tmate unavailable for SSH debugging"
+  fi
 }
 start_tmate_supervised() {
-	command -v tmate-tools >/dev/null 2>&1 || return 0
-	start_tmate_boot || return 1
-	tmate-tools wait & TMATE_WAITER_PID=$!
+  command -v tmate-tools >/dev/null 2>&1 || return 0
+  start_tmate_boot || return 1
+  tmate-tools wait &
+  TMATE_WAITER_PID=$!
 }
 start_tmate_supervised
 
@@ -610,15 +628,15 @@ log "Provider   : ${PROVIDER_FOR_CONFIG:-unset}"
 log "Agent      : $AGENT_NAME"
 log ""
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-	log "Telegram   : enabled"
+  log "Telegram   : enabled"
 else
-	log "Telegram   : not configured"
+  log "Telegram   : not configured"
 fi
 [ -n "${HF_TOKEN:-}" ] &&
-	log "Backup     : enabled (bucket ${BACKUP_BUCKET:-hermes-backup}/${AGENT_NAME})" ||
-	log "Backup     : disabled"
+  log "Backup     : enabled (bucket ${BACKUP_BUCKET:-hermes-backup}/${AGENT_NAME})" ||
+  log "Backup     : disabled"
 [ -n "${CLOUDFLARE_PROXY_URL:-}" ] &&
-	log "CF Proxy   : ${CLOUDFLARE_PROXY_URL}"
+  log "CF Proxy   : ${CLOUDFLARE_PROXY_URL}"
 log ""
 log "Router     : 0.0.0.0:${PUBLIC_PORT}"
 log "WebUI      : 127.0.0.1:${WEBUI_PORT}"
@@ -628,81 +646,81 @@ log ""
 
 # ── Process launchers ─────────────────────────────────────────────────
 start_health() {
-	node "$APP_DIR/server/health-server.js" &
-	HEALTH_PID=$!
+  node "$APP_DIR/server/health-server.js" &
+  HEALTH_PID=$!
 }
 
 start_dashboard() {
-	echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}"
-	(hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
-	DASHBOARD_PID=$!
+  echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}"
+  (hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
+  DASHBOARD_PID=$!
 }
 
 start_gateway() {
-	echo "Launching Hermes gateway"
-	(hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
-	GATEWAY_PID=$!
+  echo "Launching Hermes gateway"
+  (hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
+  GATEWAY_PID=$!
 }
 
 start_webui() {
-	echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}"
-	(cd "$WEBUI_REPO" &&
-		"$HERMES_WEBUI_PYTHON" "$WEBUI_REPO/server.py" 2>&1 |
-		tee -a "$HERMES_HOME/logs/webui.log") &
-	WEBUI_PID=$!
+  echo "Launching Hermes WebUI on 127.0.0.1:${WEBUI_PORT}"
+  (cd "$WEBUI_REPO" &&
+    "$HERMES_WEBUI_PYTHON" "$WEBUI_REPO/server.py" 2>&1 |
+    tee -a "$HERMES_HOME/logs/webui.log") &
+  WEBUI_PID=$!
 }
 
 SYNC_LOOP_PID=""
 start_sync_loop() {
-	[ -n "${HF_TOKEN:-}" ] || return 0
-	if [ -n "${SYNC_LOOP_PID:-}" ] && kill -0 "$SYNC_LOOP_PID" 2>/dev/null; then
-		return 0
-	fi
-	python3 -u "$APP_DIR/sync/hermes-sync.py" loop &
-	SYNC_LOOP_PID=$!
+  [ -n "${HF_TOKEN:-}" ] || return 0
+  if [ -n "${SYNC_LOOP_PID:-}" ] && kill -0 "$SYNC_LOOP_PID" 2>/dev/null; then
+    return 0
+  fi
+  python3 -u "$APP_DIR/sync/hermes-sync.py" loop &
+  SYNC_LOOP_PID=$!
 }
 
 sync_now() {
-	[ -n "${HF_TOKEN:-}" ] || return 0
-	python3 "$APP_DIR/sync/hermes-sync.py" sync-once || echo "Warning: state sync failed."
+  [ -n "${HF_TOKEN:-}" ] || return 0
+  python3 "$APP_DIR/sync/hermes-sync.py" sync-once || echo "Warning: state sync failed."
 }
 
 wait_port_ready() {
-	local port="$1" timeout="$2" pid="$3" i
-	for ((i = 0; i < timeout; i++)); do
-		if (echo >"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
-			return 0
-		fi
-		if ! kill -0 "$pid" 2>/dev/null; then
-			return 1
-		fi
-		sleep 1
-	done
-	return 1
+  local port="$1" timeout="$2" pid="$3" i
+  for ((i = 0; i < timeout; i++)); do
+    if (echo >"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 kill_tree() {
-	local pid="$1" child
-	[ -n "$pid" ] || return 0
-	if [ -r "/proc/$pid/task/$pid/children" ]; then
-		for child in $(cat "/proc/$pid/task/$pid/children" 2>/dev/null); do
-			kill_tree "$child"
-		done
-	fi
-	kill -TERM "$pid" 2>/dev/null || true
+  local pid="$1" child
+  [ -n "$pid" ] || return 0
+  if [ -r "/proc/$pid/task/$pid/children" ]; then
+    for child in $(cat "/proc/$pid/task/$pid/children" 2>/dev/null); do
+      kill_tree "$child"
+    done
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
 }
 
 # ── Graceful shutdown ─────────────────────────────────────────────────
 graceful_shutdown() {
-	trap '' SIGTERM SIGINT
-	echo "Shutting down"
-	sync_now
-	for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}" "${TMATE_WAITER_PID:-}"; do
-		kill_tree "$pid"
-	done
-	tmate-tools kill boot 2>/dev/null || true
-	kill $(jobs -p) 2>/dev/null || true
-	exit 0
+  trap '' SIGTERM SIGINT
+  echo "Shutting down"
+  sync_now
+  for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}" "${TMATE_WAITER_PID:-}"; do
+    kill_tree "$pid"
+  done
+  tmate-tools kill boot 2>/dev/null || true
+  kill $(jobs -p) 2>/dev/null || true
+  exit 0
 }
 trap graceful_shutdown SIGTERM SIGINT
 
@@ -723,51 +741,50 @@ WEBUI_READY_TIMEOUT="${WEBUI_READY_TIMEOUT:-60}"
 start_health
 
 if [ -n "${WEBHOOK_URL:-}" ]; then
-	"$APP_DIR/boot/notify-webhook.py" >/dev/null 2>&1 &
+  "$APP_DIR/boot/notify-webhook.py" >/dev/null 2>&1 &
 fi
-
 
 # ── Run workspace startup script ──
 if [ -s "$STARTUP_FILE" ]; then
-	echo "Running workspace/startup.sh..."
-	set +e
-	HERMES_CAPTURE_DISABLE=1 bash -l "$STARTUP_FILE"
-	set -e
-	echo "Workspace startup script complete."
+  echo "Running $STARTUP_FILE..."
+  set +e
+  HERMES_CAPTURE_DISABLE=1 bash -l "$STARTUP_FILE"
+  set -e
+  echo "Workspace startup script complete."
 fi
 
 start_dashboard
 
 if [ -f "$HERMES_HOME/.env" ]; then
-	echo "Sourcing captured shell env from \$HERMES_HOME/.env"
-	set -a
-	. "$HERMES_HOME/.env"
-	set +a
+  echo "Sourcing captured shell env from \$HERMES_HOME/.env"
+  set -a
+  . "$HERMES_HOME/.env"
+  set +a
 fi
 
 start_gateway
 start_webui
 
 if ! wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
-	echo ""
-	echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
-	echo "----------------------------------------"
-	tail -40 "$HERMES_HOME/logs/gateway.log" || true
-	exit 1
+  echo ""
+  echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
+  echo "----------------------------------------"
+  tail -40 "$HERMES_HOME/logs/gateway.log" || true
+  exit 1
 fi
 
 if [ -z "$MODEL_FOR_CONFIG" ]; then
-	die "CRITICAL: No model configured. Ensure LLM_MODEL is set."
+  die "CRITICAL: No model configured. Ensure LLM_MODEL is set."
 fi
 log "✓ Model configured: $MODEL_FOR_CONFIG"
 
 start_sync_loop
 
 if wait_port_ready "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT" "$WEBUI_PID"; then
-	echo "Hermes WebUI is up."
+  echo "Hermes WebUI is up."
 else
-	echo "Warning: Hermes WebUI not ready within ${WEBUI_READY_TIMEOUT}s. Last 20 log lines:"
-	tail -20 "$HERMES_HOME/logs/webui.log" || true
+  echo "Warning: Hermes WebUI not ready within ${WEBUI_READY_TIMEOUT}s. Last 20 log lines:"
+  tail -20 "$HERMES_HOME/logs/webui.log" || true
 fi
 
 # ── Wait for background Telegram webhook clear (must finish before polling) ────
@@ -782,83 +799,89 @@ SUPERVISOR_BACKOFF_MAX="${SUPERVISOR_BACKOFF_MAX:-30}"
 SUPERVISOR_HEALTHY_WINDOW="${SUPERVISOR_HEALTHY_WINDOW:-60}"
 
 supervisor_backoff() {
-	# $1 = per-service state key. Sets global SUP_DELAY and advances counters.
-	# Must run in the current shell (NOT $(...)) so the counters persist.
-	local key="$1" now fails last i
-	local fails_var="SUP_FAILS_$key" last_var="SUP_LAST_$key"
-	now=$(date +%s)
-	fails="${!fails_var:-0}"
-	last="${!last_var:-0}"
-	if [ "$last" -ne 0 ] && [ "$((now - last))" -ge "$SUPERVISOR_HEALTHY_WINDOW" ]; then
-		fails=0
-	fi
-	if [ "$fails" -le 0 ]; then
-		SUP_DELAY=0
-	else
-		SUP_DELAY=1
-		i=1
-		while [ "$i" -lt "$fails" ] && [ "$SUP_DELAY" -lt "$SUPERVISOR_BACKOFF_MAX" ]; do
-			SUP_DELAY=$((SUP_DELAY * 2))
-			i=$((i + 1))
-		done
-		[ "$SUP_DELAY" -gt "$SUPERVISOR_BACKOFF_MAX" ] && SUP_DELAY="$SUPERVISOR_BACKOFF_MAX"
-	fi
-	printf -v "$fails_var" '%s' "$((fails + 1))"
-	printf -v "$last_var" '%s' "$now"
+  # $1 = per-service state key. Sets global SUP_DELAY and advances counters.
+  # Must run in the current shell (NOT $(...)) so the counters persist.
+  local key="$1" now fails last i
+  local fails_var="SUP_FAILS_$key" last_var="SUP_LAST_$key"
+  now=$(date +%s)
+  fails="${!fails_var:-0}"
+  last="${!last_var:-0}"
+  if [ "$last" -ne 0 ] && [ "$((now - last))" -ge "$SUPERVISOR_HEALTHY_WINDOW" ]; then
+    fails=0
+  fi
+  if [ "$fails" -le 0 ]; then
+    SUP_DELAY=0
+  else
+    SUP_DELAY=1
+    i=1
+    while [ "$i" -lt "$fails" ] && [ "$SUP_DELAY" -lt "$SUPERVISOR_BACKOFF_MAX" ]; do
+      SUP_DELAY=$((SUP_DELAY * 2))
+      i=$((i + 1))
+    done
+    [ "$SUP_DELAY" -gt "$SUPERVISOR_BACKOFF_MAX" ] && SUP_DELAY="$SUPERVISOR_BACKOFF_MAX"
+  fi
+  printf -v "$fails_var" '%s' "$((fails + 1))"
+  printf -v "$last_var" '%s' "$now"
 }
 
 supervisor_check() {
-	local name="$1" pid_var="$2" restart_fn="$3" port="${4:-}" port_timeout="${5:-}"
-	supervisor_backoff "${pid_var%_PID}"
-	warn "Hermes $name died (PID ${!pid_var:-?}). Respawning in ${SUP_DELAY}s"
-	[ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
-	"$restart_fn"
-	if [ -n "$port" ] && [ -n "$port_timeout" ]; then
-		(
-			if wait_port_ready "$port" "$port_timeout" "${!pid_var}"; then
-				log "$name restarted successfully"
-			else
-				warn "$name failed to restart — continuing anyway"
-			fi
-		) &
-	fi
-	sync_now
+  local name="$1" pid_var="$2" restart_fn="$3" port="${4:-}" port_timeout="${5:-}"
+  supervisor_backoff "${pid_var%_PID}"
+  warn "Hermes $name died (PID ${!pid_var:-?}). Respawning in ${SUP_DELAY}s"
+  [ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
+  "$restart_fn"
+  if [ -n "$port" ] && [ -n "$port_timeout" ]; then
+    (
+      if wait_port_ready "$port" "$port_timeout" "${!pid_var}"; then
+        log "$name restarted successfully"
+      else
+        warn "$name failed to restart — continuing anyway"
+      fi
+    ) &
+  fi
+  sync_now
 }
 
 log "Starting event-driven service supervisor"
 
 while true; do
-	# block until ANY child exits; status intentionally ignored.
-	# `|| rc=$?` keeps the bare wait from tripping `set -e` on a crashed child.
-	rc=0
-	wait -n || rc=$?
-	[ "$rc" -eq 127 ] && { warn "supervisor: no child processes left — exiting"; break; }
+  # block until ANY child exits; status intentionally ignored.
+  # `|| rc=$?` keeps the bare wait from tripping `set -e` on a crashed child.
+  rc=0
+  wait -n || rc=$?
+  [ "$rc" -eq 127 ] && {
+    warn "supervisor: no child processes left — exiting"
+    break
+  }
 
-	# Gateway (capped restarts)
-	if [ -n "${GATEWAY_PID:-}" ] && ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
-		if [ "$SUPERVISOR_MAX_RESTARTS" != "0" ] && [ "$GATEWAY_RESTART_COUNT" -ge "$SUPERVISOR_MAX_RESTARTS" ]; then
-			warn "gateway exceeded SUPERVISOR_MAX_RESTARTS ($SUPERVISOR_MAX_RESTARTS) — exiting for clean restart"
-			sync_now; exit 1
-		fi
-		GATEWAY_RESTART_COUNT=$((GATEWAY_RESTART_COUNT + 1))
-		supervisor_check "gateway" GATEWAY_PID start_gateway "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT"
-	fi
-	# WebUI / health / dashboard
-	if [ -n "${WEBUI_PID:-}" ]     && ! kill -0 "$WEBUI_PID" 2>/dev/null;     then supervisor_check "WebUI" WEBUI_PID start_webui "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT"; fi
-	if [ -n "${HEALTH_PID:-}" ]    && ! kill -0 "$HEALTH_PID" 2>/dev/null;    then supervisor_check "health server" HEALTH_PID start_health; fi
-	if [ -n "${DASHBOARD_PID:-}" ] && ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then supervisor_check "dashboard" DASHBOARD_PID start_dashboard; fi
-	# Backup sync loop
-	if [ -n "${HF_TOKEN:-}" ] && { [ -z "${SYNC_LOOP_PID:-}" ] || ! kill -0 "$SYNC_LOOP_PID" 2>/dev/null; }; then
-		supervisor_backoff SYNC_LOOP
-		warn "Backup sync loop died. Respawning in ${SUP_DELAY}s"
-		[ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
-		SYNC_LOOP_PID=""; start_sync_loop
-	fi
-	# tmate boot proxy — event-driven: proxy death == session death
-	if [ -n "${TMATE_WAITER_PID:-}" ] && ! kill -0 "$TMATE_WAITER_PID" 2>/dev/null; then
-		supervisor_backoff TMATE
-		warn "tmate boot session died. Respawning in ${SUP_DELAY}s"
-		[ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
-		TMATE_WAITER_PID=""; start_tmate_supervised || true
-	fi
+  # Gateway (capped restarts)
+  if [ -n "${GATEWAY_PID:-}" ] && ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+    if [ "$SUPERVISOR_MAX_RESTARTS" != "0" ] && [ "$GATEWAY_RESTART_COUNT" -ge "$SUPERVISOR_MAX_RESTARTS" ]; then
+      warn "gateway exceeded SUPERVISOR_MAX_RESTARTS ($SUPERVISOR_MAX_RESTARTS) — exiting for clean restart"
+      sync_now
+      exit 1
+    fi
+    GATEWAY_RESTART_COUNT=$((GATEWAY_RESTART_COUNT + 1))
+    supervisor_check "gateway" GATEWAY_PID start_gateway "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT"
+  fi
+  # WebUI / health / dashboard
+  if [ -n "${WEBUI_PID:-}" ] && ! kill -0 "$WEBUI_PID" 2>/dev/null; then supervisor_check "WebUI" WEBUI_PID start_webui "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT"; fi
+  if [ -n "${HEALTH_PID:-}" ] && ! kill -0 "$HEALTH_PID" 2>/dev/null; then supervisor_check "health server" HEALTH_PID start_health; fi
+  if [ -n "${DASHBOARD_PID:-}" ] && ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then supervisor_check "dashboard" DASHBOARD_PID start_dashboard; fi
+  # Backup sync loop
+  if [ -n "${HF_TOKEN:-}" ] && { [ -z "${SYNC_LOOP_PID:-}" ] || ! kill -0 "$SYNC_LOOP_PID" 2>/dev/null; }; then
+    supervisor_backoff SYNC_LOOP
+    warn "Backup sync loop died. Respawning in ${SUP_DELAY}s"
+    [ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
+    SYNC_LOOP_PID=""
+    start_sync_loop
+  fi
+  # tmate boot proxy — event-driven: proxy death == session death
+  if [ -n "${TMATE_WAITER_PID:-}" ] && ! kill -0 "$TMATE_WAITER_PID" 2>/dev/null; then
+    supervisor_backoff TMATE
+    warn "tmate boot session died. Respawning in ${SUP_DELAY}s"
+    [ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
+    TMATE_WAITER_PID=""
+    start_tmate_supervised || true
+  fi
 done
