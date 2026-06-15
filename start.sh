@@ -584,30 +584,13 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
 fi
 
 # ── SSH Debug Access (tmate) ──────────────────────────────────────────────────
-TMATE_WAITER_PID=""
+TMATE_SUPERVISOR_PID=""
 TMATE_DIR="${TMATE_DIR:-/tmp/tmate}"
-start_tmate_boot() {
-  if ! command -v tmate >/dev/null 2>&1 || ! command -v tmate-tools >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "set -g mouse off" >"$HOME/.tmate.conf"
-  local out ssh_url
-  out=$(tmate-tools boot 2>/dev/null) || {
-    warn "tmate boot failed"
-    return 1
-  }
-  ssh_url=$(echo "$out" | sed -n 's/^ssh:[[:space:]]*//p')
-  if [ -n "${ssh_url:-}" ]; then
-    log "SSH access: $ssh_url"
-  else
-    log "tmate unavailable for SSH debugging"
-  fi
-}
 start_tmate_supervised() {
   command -v tmate-tools >/dev/null 2>&1 || return 0
-  start_tmate_boot || return 1
-  tmate-tools wait &
-  TMATE_WAITER_PID=$!
+  echo "set -g mouse off" >"$HOME/.tmate.conf"
+  tmate-tools supervise &
+  TMATE_SUPERVISOR_PID=$!
 }
 start_tmate_supervised
 
@@ -709,7 +692,7 @@ graceful_shutdown() {
   trap '' SIGTERM SIGINT
   echo "Shutting down"
   sync_now
-  for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}" "${TMATE_WAITER_PID:-}"; do
+  for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}" "${TMATE_SUPERVISOR_PID:-}"; do
     kill_tree "$pid"
   done
   tmate-tools kill boot 2>/dev/null || true
@@ -870,12 +853,12 @@ while true; do
     SYNC_LOOP_PID=""
     start_sync_loop
   fi
-  # tmate boot proxy — event-driven: proxy death == session death
-  if [ -n "${TMATE_WAITER_PID:-}" ] && ! kill -0 "$TMATE_WAITER_PID" 2>/dev/null; then
+  # tmate boot supervisor — restart the supervisor process if it dies
+  if [ -n "${TMATE_SUPERVISOR_PID:-}" ] && ! kill -0 "$TMATE_SUPERVISOR_PID" 2>/dev/null; then
     supervisor_backoff TMATE
-    warn "tmate boot session died. Respawning in ${SUP_DELAY}s"
+    warn "tmate supervisor died. Respawning in ${SUP_DELAY}s"
     [ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
-    TMATE_WAITER_PID=""
+    TMATE_SUPERVISOR_PID=""
     start_tmate_supervised || true
   fi
 done

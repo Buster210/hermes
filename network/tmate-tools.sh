@@ -134,6 +134,8 @@ cmd_boot() {
 		echo "ssh_ro:  $ssh_ro"
 		echo "web:     $web"
 		echo "web_ro:  $web_ro"
+		_notify "$(printf 'New tmate session: %s\n```bash\n%s\n```\nweb: %s' \
+			"$(_md2 "boot")" "$ssh" "$(_md2 "$web")")"
 		return 0
 	fi
 	# Clean stale socket.
@@ -191,6 +193,29 @@ cmd_wait() {
 		sleep "${TMATE_POLL_INTERVAL:-5}"
 	done
 }
+cmd_supervise() {
+	local BOOT_SOCK="$TMATE_DIR/boot.sock"
+	local poll="${TMATE_POLL_INTERVAL:-2}" fails=0 delay
+	# Durable: ensure the boot session is alive; recreate+notify on death.
+	# cmd_boot runs in a subshell so its set -e `_die` can't kill this loop.
+	while true; do
+		if _alive "$BOOT_SOCK"; then
+			fails=0
+			sleep "$poll"
+			continue
+		fi
+		if ( cmd_boot ); then
+			fails=0
+			sleep "$poll"
+		else
+			# relay unreachable — exponential backoff, capped.
+			fails=$((fails + 1))
+			delay=$((fails * 2))
+			[ "$delay" -gt "${TMATE_BACKOFF_MAX:-30}" ] && delay="${TMATE_BACKOFF_MAX:-30}"
+			sleep "$delay"
+		fi
+	done
+}
 
 action=""
 case "${0##*/}" in
@@ -210,6 +235,7 @@ kill | rm) cmd_kill "$@" ;;
 boot) cmd_boot ;;
 boot-socket) cmd_boot_socket ;;
 wait) cmd_wait ;;
--h | --help | help) echo "usage: tmate-new [name] | tmate-ls | tmate-kill <name> | tmate-boot | tmate-boot-socket | tmate-wait" ;;
+supervise) cmd_supervise ;;
+-h | --help | help) echo "usage: tmate-new [name] | tmate-ls | tmate-kill <name> | tmate-boot | tmate-boot-socket | tmate-wait | tmate-supervise" ;;
 *) _die "unknown command '$action' (try --help)" ;;
 esac
