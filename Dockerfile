@@ -72,6 +72,7 @@ RUN chmod +x /opt/hermes/start.sh /opt/hermes/sync/hermes-sync.py \
  && ln -sf /opt/hermes/network/tmate-tools.sh /usr/local/bin/tmate-new \
  && ln -sf /opt/hermes/network/tmate-tools.sh /usr/local/bin/tmate-ls \
  && ln -sf /opt/hermes/network/tmate-tools.sh /usr/local/bin/tmate-kill \
+ && ln -sf /opt/hermes/network/tmate-tools.sh /usr/local/bin/tmate-tools \
  && chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/npm-global \
  && chown hermes:hermes /home \
  && echo 'export PATH="/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH"' \

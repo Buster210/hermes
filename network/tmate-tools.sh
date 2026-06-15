@@ -119,6 +119,78 @@ cmd_kill() {
 	rm -f "$sock" 2>/dev/null || true
 	echo "killed: $name"
 }
+cmd_boot() {
+	local BOOT_SOCK="$TMATE_DIR/boot.sock" cwd
+	# Idempotent: if the boot session is already alive, just report it.
+	if _alive "$BOOT_SOCK"; then
+		local ssh ssh_ro web web_ro
+		ssh=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_ssh}' 2>/dev/null || true)
+		ssh_ro=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_ssh_ro}' 2>/dev/null || true)
+		web=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_web}' 2>/dev/null || true)
+		web_ro=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_web_ro}' 2>/dev/null || true)
+		echo "name:    boot"
+		echo "socket:  $BOOT_SOCK"
+		echo "ssh:     $ssh"
+		echo "ssh_ro:  $ssh_ro"
+		echo "web:     $web"
+		echo "web_ro:  $web_ro"
+		return 0
+	fi
+	# Clean stale socket.
+	rm -f "$BOOT_SOCK" 2>/dev/null || true
+
+	cwd="${TMATE_CWD:-$PWD}"
+	[ -d "$cwd" ] || cwd="$HOME"
+
+	local err
+	err=$(env -u TMUX -u TMATE tmate -S "$BOOT_SOCK" new-session -d -s boot -c "$cwd" 2>&1) ||
+		_die "failed to start tmate boot: ${err:-unknown}"
+	if ! timeout "$READY_TIMEOUT" tmate -S "$BOOT_SOCK" wait tmate-ready 2>/dev/null; then
+		tmate -S "$BOOT_SOCK" kill-server 2>/dev/null || true
+		rm -f "$BOOT_SOCK" 2>/dev/null || true
+		_die "boot not ready within ${READY_TIMEOUT}s (relay unreachable?)"
+	fi
+
+	# Size to the largest client so the idle control-mode monitor proxy
+	# (cmd_wait's `-C attach-session`, 80x24) can't clamp the real SSH window.
+	tmate -S "$BOOT_SOCK" set -g window-size largest 2>/dev/null || true
+
+	local ssh ssh_ro web web_ro
+	ssh=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_ssh}' 2>/dev/null || true)
+	ssh_ro=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_ssh_ro}' 2>/dev/null || true)
+	web=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_web}' 2>/dev/null || true)
+	web_ro=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_web_ro}' 2>/dev/null || true)
+
+	echo "name:    boot"
+	echo "socket:  $BOOT_SOCK"
+	echo "ssh:     $ssh"
+	echo "ssh_ro:  $ssh_ro"
+	echo "web:     $web"
+	echo "web_ro:  $web_ro"
+
+	_notify "$(printf 'New tmate session: %s\n```bash\n%s\n```\nweb: %s' \
+		"$(_md2 "boot")" "$ssh" "$(_md2 "$web")")"
+}
+
+cmd_boot_socket() {
+	local BOOT_SOCK="$TMATE_DIR/boot.sock"
+	if _alive "$BOOT_SOCK"; then
+		echo "$BOOT_SOCK"
+		return 0
+	fi
+	return 1
+}
+
+cmd_wait() {
+	local BOOT_SOCK="$TMATE_DIR/boot.sock"
+	# Poll-only: never attach as a client. A control-mode (`-C attach`) proxy
+	# counts as an 80x24 client and clamps the real SSH window to its size, so
+	# we watch the socket instead of holding it. Death detected within one
+	# TMATE_POLL_INTERVAL — fine for tmate (not latency-critical).
+	while _alive "$BOOT_SOCK"; do
+		sleep "${TMATE_POLL_INTERVAL:-5}"
+	done
+}
 
 action=""
 case "${0##*/}" in
@@ -135,6 +207,9 @@ case "$action" in
 new) cmd_new "$@" ;;
 ls | list) cmd_ls ;;
 kill | rm) cmd_kill "$@" ;;
--h | --help | help) echo "usage: tmate-new [name] | tmate-ls | tmate-kill <name>" ;;
+boot) cmd_boot ;;
+boot-socket) cmd_boot_socket ;;
+wait) cmd_wait ;;
+-h | --help | help) echo "usage: tmate-new [name] | tmate-ls | tmate-kill <name> | tmate-boot | tmate-boot-socket | tmate-wait" ;;
 *) _die "unknown command '$action' (try --help)" ;;
 esac

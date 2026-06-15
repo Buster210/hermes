@@ -576,11 +576,28 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${TELEGRAM_WEBHOOK_URL:-}" ]; then
 fi
 
 # ── SSH Debug Access (tmate) ──────────────────────────────────────────────────
-if command -v tmate >/dev/null 2>&1 && command -v tmate-new >/dev/null 2>&1; then
+TMATE_WAITER_PID=""
+TMATE_DIR="${TMATE_DIR:-/tmp/tmate}"
+start_tmate_boot() {
+	if ! command -v tmate >/dev/null 2>&1 || ! command -v tmate-tools >/dev/null 2>&1; then
+		return 0
+	fi
 	echo "set -g mouse off" >"$HOME/.tmate.conf"
-	SSH_URL=$(tmate-new boot 2>/dev/null | sed -n 's/^ssh:[[:space:]]*//p') || true
-	[ -n "${SSH_URL:-}" ] && log "SSH access: $SSH_URL" || log "tmate unavailable for SSH debugging"
-fi
+	local out ssh_url
+	out=$(tmate-tools boot 2>/dev/null) || { warn "tmate boot failed"; return 1; }
+	ssh_url=$(echo "$out" | sed -n 's/^ssh:[[:space:]]*//p')
+	if [ -n "${ssh_url:-}" ]; then
+		log "SSH access: $ssh_url"
+	else
+		log "tmate unavailable for SSH debugging"
+	fi
+}
+start_tmate_supervised() {
+	command -v tmate-tools >/dev/null 2>&1 || return 0
+	start_tmate_boot || return 1
+	tmate-tools wait & TMATE_WAITER_PID=$!
+}
+start_tmate_supervised
 
 # ── Startup summary ────────────────────────────────────────────────────────────
 log ""
@@ -680,9 +697,10 @@ graceful_shutdown() {
 	trap '' SIGTERM SIGINT
 	echo "Shutting down"
 	sync_now
-	for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}"; do
+	for pid in "${WEBUI_PID:-}" "${GATEWAY_PID:-}" "${DASHBOARD_PID:-}" "${HEALTH_PID:-}" "${SYNC_LOOP_PID:-}" "${TMATE_WAITER_PID:-}"; do
 		kill_tree "$pid"
 	done
+	tmate-tools kill boot 2>/dev/null || true
 	kill $(jobs -p) 2>/dev/null || true
 	exit 0
 }
@@ -755,59 +773,92 @@ fi
 # ── Wait for background Telegram webhook clear (must finish before polling) ────
 wait "${CLEAR_WEBHOOK_PID:-}" 2>/dev/null || true
 
-# ── Service restart loop (self-healing) ───────────────────────────────────────
-SUPERVISOR_POLL_INTERVAL="${SUPERVISOR_POLL_INTERVAL:-10}"
+# ── Service supervisor (event-driven via wait -n) ─────────────────────────────
 SUPERVISOR_MAX_RESTARTS="${SUPERVISOR_MAX_RESTARTS:-0}"
 GATEWAY_RESTART_COUNT=0
+# Exponential restart backoff: instant, 1, 2, 4, … capped at MAX. A service that
+# stays up for HEALTHY_WINDOW resets its streak, so only rapid re-crashes back off.
+SUPERVISOR_BACKOFF_MAX="${SUPERVISOR_BACKOFF_MAX:-30}"
+SUPERVISOR_HEALTHY_WINDOW="${SUPERVISOR_HEALTHY_WINDOW:-60}"
+
+supervisor_backoff() {
+	# $1 = per-service state key. Sets global SUP_DELAY and advances counters.
+	# Must run in the current shell (NOT $(...)) so the counters persist.
+	local key="$1" now fails last i
+	local fails_var="SUP_FAILS_$key" last_var="SUP_LAST_$key"
+	now=$(date +%s)
+	fails="${!fails_var:-0}"
+	last="${!last_var:-0}"
+	if [ "$last" -ne 0 ] && [ "$((now - last))" -ge "$SUPERVISOR_HEALTHY_WINDOW" ]; then
+		fails=0
+	fi
+	if [ "$fails" -le 0 ]; then
+		SUP_DELAY=0
+	else
+		SUP_DELAY=1
+		i=1
+		while [ "$i" -lt "$fails" ] && [ "$SUP_DELAY" -lt "$SUPERVISOR_BACKOFF_MAX" ]; do
+			SUP_DELAY=$((SUP_DELAY * 2))
+			i=$((i + 1))
+		done
+		[ "$SUP_DELAY" -gt "$SUPERVISOR_BACKOFF_MAX" ] && SUP_DELAY="$SUPERVISOR_BACKOFF_MAX"
+	fi
+	printf -v "$fails_var" '%s' "$((fails + 1))"
+	printf -v "$last_var" '%s' "$now"
+}
 
 supervisor_check() {
 	local name="$1" pid_var="$2" restart_fn="$3" port="${4:-}" port_timeout="${5:-}"
-	local pid="${!pid_var:-}"
-	[ -n "$pid" ] || return 0
-	kill -0 "$pid" 2>/dev/null && return 0
-	warn "Hermes $name died (PID $pid). Respawning in 5s"
-	sleep 5
+	supervisor_backoff "${pid_var%_PID}"
+	warn "Hermes $name died (PID ${!pid_var:-?}). Respawning in ${SUP_DELAY}s"
+	[ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
 	"$restart_fn"
 	if [ -n "$port" ] && [ -n "$port_timeout" ]; then
-		if wait_port_ready "$port" "$port_timeout" "${!pid_var}"; then
-			log "$name restarted successfully"
-		else
-			warn "$name failed to restart — continuing anyway"
-		fi
+		(
+			if wait_port_ready "$port" "$port_timeout" "${!pid_var}"; then
+				log "$name restarted successfully"
+			else
+				warn "$name failed to restart — continuing anyway"
+			fi
+		) &
 	fi
 	sync_now
 }
 
-log "Starting service monitor loop (restart on crash)"
+log "Starting event-driven service supervisor"
 
 while true; do
-	sleep "$SUPERVISOR_POLL_INTERVAL"
+	# block until ANY child exits; status intentionally ignored.
+	# `|| rc=$?` keeps the bare wait from tripping `set -e` on a crashed child.
+	rc=0
+	wait -n || rc=$?
+	[ "$rc" -eq 127 ] && { warn "supervisor: no child processes left — exiting"; break; }
 
-	if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+	# Gateway (capped restarts)
+	if [ -n "${GATEWAY_PID:-}" ] && ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
 		if [ "$SUPERVISOR_MAX_RESTARTS" != "0" ] && [ "$GATEWAY_RESTART_COUNT" -ge "$SUPERVISOR_MAX_RESTARTS" ]; then
-			warn "Hermes gateway exceeded SUPERVISOR_MAX_RESTARTS ($SUPERVISOR_MAX_RESTARTS) — syncing and exiting for a clean restart"
-			sync_now
-			exit 1
+			warn "gateway exceeded SUPERVISOR_MAX_RESTARTS ($SUPERVISOR_MAX_RESTARTS) — exiting for clean restart"
+			sync_now; exit 1
 		fi
 		GATEWAY_RESTART_COUNT=$((GATEWAY_RESTART_COUNT + 1))
-		warn "Hermes gateway died (PID $GATEWAY_PID). Respawning in 5s (restart $GATEWAY_RESTART_COUNT)"
-		sleep 5
-		start_gateway
-		if wait_port_ready "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT" "$GATEWAY_PID"; then
-			log "Gateway restarted successfully"
-		else
-			warn "Gateway failed to restart — continuing anyway"
-		fi
-		sync_now
+		supervisor_check "gateway" GATEWAY_PID start_gateway "$GATEWAY_API_PORT" "$GATEWAY_READY_TIMEOUT"
 	fi
-
-	supervisor_check "WebUI"          WEBUI_PID    start_webui    "$WEBUI_PORT"     "$WEBUI_READY_TIMEOUT"
-	supervisor_check "health server"  HEALTH_PID   start_health
-	supervisor_check "dashboard"      DASHBOARD_PID start_dashboard
-
+	# WebUI / health / dashboard
+	if [ -n "${WEBUI_PID:-}" ]     && ! kill -0 "$WEBUI_PID" 2>/dev/null;     then supervisor_check "WebUI" WEBUI_PID start_webui "$WEBUI_PORT" "$WEBUI_READY_TIMEOUT"; fi
+	if [ -n "${HEALTH_PID:-}" ]    && ! kill -0 "$HEALTH_PID" 2>/dev/null;    then supervisor_check "health server" HEALTH_PID start_health; fi
+	if [ -n "${DASHBOARD_PID:-}" ] && ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then supervisor_check "dashboard" DASHBOARD_PID start_dashboard; fi
+	# Backup sync loop
 	if [ -n "${HF_TOKEN:-}" ] && { [ -z "${SYNC_LOOP_PID:-}" ] || ! kill -0 "$SYNC_LOOP_PID" 2>/dev/null; }; then
-		warn "Backup sync loop died. Respawning"
-		SYNC_LOOP_PID=""
-		start_sync_loop
+		supervisor_backoff SYNC_LOOP
+		warn "Backup sync loop died. Respawning in ${SUP_DELAY}s"
+		[ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
+		SYNC_LOOP_PID=""; start_sync_loop
+	fi
+	# tmate boot proxy — event-driven: proxy death == session death
+	if [ -n "${TMATE_WAITER_PID:-}" ] && ! kill -0 "$TMATE_WAITER_PID" 2>/dev/null; then
+		supervisor_backoff TMATE
+		warn "tmate boot session died. Respawning in ${SUP_DELAY}s"
+		[ "$SUP_DELAY" -gt 0 ] && sleep "$SUP_DELAY"
+		TMATE_WAITER_PID=""; start_tmate_supervised || true
 	fi
 done
