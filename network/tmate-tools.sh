@@ -10,6 +10,11 @@ READY_TIMEOUT="${TMATE_READY_TIMEOUT:-15}"
 
 mkdir -p "$TMATE_DIR"
 
+_TMATE_LOG="${TMATE_LOG:-$TMATE_DIR/supervisor.log}"
+_log() {
+	printf '[%s] tmate-tools: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$_TMATE_LOG" >&2 || true
+}
+
 _die() {
 	echo "tmate-tools: $*" >&2
 	exit 1
@@ -28,23 +33,30 @@ _name_of() { tmate -S "$1" display -p '#{session_name}' 2>/dev/null || true; }
 
 _md2() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/[][_*()~`>#+=|{}.!-]/\\&/g'; }
 
-# Telegram notify (best-effort; never fails caller). TMATE_NOTIFY=0 disables.
+# Telegram notify. Returns 0 on success/skip, non-zero on delivery failure.
+# TMATE_NOTIFY=0 disables. TMATE_BOOT_NO_NOTIFY=1 suppresses (used by supervise loop).
 _notify() {
 	[ "${TMATE_NOTIFY:-1}" = "0" ] && return 0
-	command -v curl >/dev/null 2>&1 || return 0
+	[ "${TMATE_BOOT_NO_NOTIFY:-0}" = "1" ] && return 0
+	command -v curl >/dev/null 2>&1 || { _log "notify: curl not found"; return 0; }
 	local tok="${TELEGRAM_BOT_TOKEN:-}" chat="${TELEGRAM_HOME_CHANNEL:-}" base="${TELEGRAM_BASE_URL:-}"
 	local envf="${HERMES_HOME:-/opt/data}/.env"
 	if [ -f "$envf" ]; then
 		[ -n "$tok" ] || tok=$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$envf" | tail -1 | tr -d '"'\''\r')
 		[ -n "$chat" ] || chat=$(sed -n 's/^TELEGRAM_HOME_CHANNEL=//p' "$envf" | tail -1 | tr -d '"'\''\r')
 	fi
-	[ -n "$tok" ] && [ -n "$chat" ] || return 0
+	[ -n "$tok" ] && [ -n "$chat" ] || { _log "notify: TELEGRAM_BOT_TOKEN or TELEGRAM_HOME_CHANNEL not set — skipping"; return 0; }
 	local url="https://api.telegram.org/bot${tok}/sendMessage"
 	[ -n "$base" ] && url="${base}${tok}/sendMessage"
-	curl -fsS --max-time 10 -X POST "$url" \
+	local out ec
+	out=$(curl -fsS --max-time 10 -X POST "$url" \
 		--data-urlencode "chat_id=${chat}" \
 		--data-urlencode "parse_mode=MarkdownV2" \
-		--data-urlencode "text=$1" >/dev/null 2>&1 || true
+		--data-urlencode "text=$1" 2>&1)
+	ec=$?
+	[ "$ec" -eq 0 ] && return 0
+	_log "notify: curl failed (exit $ec): ${out:-no output}"
+	return "$ec"
 }
 
 _socket_for() {
@@ -97,7 +109,7 @@ cmd_new() {
 	echo "web_ro:  $web_ro"
 
 	_notify "$(printf 'New tmate session: %s\n```bash\n%s\n```\nweb: %s' \
-		"$(_md2 "$name")" "$ssh" "$(_md2 "$web")")"
+		"$(_md2 "$name")" "$ssh" "$(_md2 "$web")")" || true
 }
 
 cmd_ls() {
@@ -135,7 +147,7 @@ cmd_boot() {
 		echo "web:     $web"
 		echo "web_ro:  $web_ro"
 		_notify "$(printf 'New tmate session: %s\n```bash\n%s\n```\nweb: %s' \
-			"$(_md2 "boot")" "$ssh" "$(_md2 "$web")")"
+			"$(_md2 "boot")" "$ssh" "$(_md2 "$web")")" || true
 		return 0
 	fi
 	# Clean stale socket.
@@ -171,7 +183,7 @@ cmd_boot() {
 	echo "web_ro:  $web_ro"
 
 	_notify "$(printf 'New tmate session: %s\n```bash\n%s\n```\nweb: %s' \
-		"$(_md2 "boot")" "$ssh" "$(_md2 "$web")")"
+		"$(_md2 "boot")" "$ssh" "$(_md2 "$web")")" || true
 }
 
 cmd_boot_socket() {
@@ -195,23 +207,61 @@ cmd_wait() {
 }
 cmd_supervise() {
 	local BOOT_SOCK="$TMATE_DIR/boot.sock"
+	local LAST_SSH_FILE="$TMATE_DIR/last_ssh"
 	local poll="${TMATE_POLL_INTERVAL:-2}" fails=0 delay
-	# Durable: ensure the boot session is alive; recreate+notify on death.
-	# cmd_boot runs in a subshell so its set -e `_die` can't kill this loop.
+	local last_known="" prev_seen=""
+
+	# Restore persisted last-known SSH string to survive tmate-tools process restarts.
+	last_known=$(cat "$LAST_SSH_FILE" 2>/dev/null || true)
+	[ -n "$last_known" ] && _log "supervise: restored last_known from $LAST_SSH_FILE"
+
 	while true; do
 		if _alive "$BOOT_SOCK"; then
 			fails=0
+			# Detect relay rotation: compare live SSH string against last notified.
+			local current web
+			current=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_ssh}' 2>/dev/null || true)
+
+			if [ -n "$current" ] && [ "$current" != "$last_known" ]; then
+				# Stability gate: require 2 consecutive identical readings before acting
+				# to filter transient values during relay handshake.
+				if [ "$current" = "$prev_seen" ]; then
+					_log "supervise: SSH details changed — notifying"
+					web=$(tmate -S "$BOOT_SOCK" display -p '#{tmate_web}' 2>/dev/null || true)
+					if _notify "$(printf 'New tmate session: %s\n```bash\n%s\n```\nweb: %s' \
+						"$(_md2 "boot")" "$current" "$(_md2 "$web")")"; then
+						last_known="$current"
+						printf '%s' "$current" > "$LAST_SSH_FILE" || true
+						_log "supervise: notification delivered — last_known updated"
+					else
+						_log "supervise: notification failed — will retry next poll"
+					fi
+					prev_seen=""
+				else
+					_log "supervise: SSH candidate detected — awaiting stability confirmation"
+					prev_seen="$current"
+				fi
+			else
+				prev_seen=""
+			fi
+
 			sleep "$poll"
 			continue
 		fi
-		if ( cmd_boot ); then
+
+		# Boot session dead — restart. Suppress internal notify; this loop owns all notifications.
+		_log "supervise: boot session lost — restarting"
+		if ( TMATE_BOOT_NO_NOTIFY=1 cmd_boot ); then
 			fails=0
+			prev_seen=""  # let stability gate confirm new SSH before notifying
+			_log "supervise: boot session restarted — awaiting SSH confirmation"
 			sleep "$poll"
 		else
 			# relay unreachable — exponential backoff, capped.
 			fails=$((fails + 1))
 			delay=$((fails * 2))
 			[ "$delay" -gt "${TMATE_BACKOFF_MAX:-30}" ] && delay="${TMATE_BACKOFF_MAX:-30}"
+			_log "supervise: restart failed (attempt $fails) — backing off ${delay}s"
 			sleep "$delay"
 		fi
 	done
