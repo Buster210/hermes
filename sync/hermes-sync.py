@@ -54,8 +54,10 @@ MAX_FILE_SIZE_BYTES = int(os.environ.get("SYNC_MAX_FILE_BYTES", str(50 * 1024 * 
 
 EXCLUDED_DIRS = {
     ".cache",
+    ".cargo",
     ".code-review-graph",
     ".npm",
+    ".rustup",
     ".venv",
     "__pycache__",
     "node_modules",
